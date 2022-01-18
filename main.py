@@ -20,6 +20,7 @@ torch.manual_seed(0)
 
 parser = ArgumentParser()
 parser.add_argument('--datadir', type=str, default='/home/ykim/data/imagenet/')
+parser.add_argument('--num-gpus', type=int)
 args = parser.parse_args()
 
 class ImageNet100(datasets.ImageFolder):
@@ -173,4 +174,4 @@ def run_demo(demo_fn, world_size):
              join=True)
 
 if __name__ == '__main__':
-    run_demo(main_ddp, 4)
+    run_demo(main_ddp, args.num_gpus)
