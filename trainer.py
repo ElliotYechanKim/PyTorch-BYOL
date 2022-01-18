@@ -61,7 +61,7 @@ class BYOLTrainer:
                                   num_workers=self.num_workers, drop_last=False, shuffle=False, 
                                   sampler = train_sampler, pin_memory = True)
 
-        pbar = tqdm(train_loader)
+       #pbar = tqdm(train_loader)
         niter = 0
         model_checkpoints_folder = os.path.join(self.writer.log_dir, 'checkpoints')
 
@@ -70,7 +70,7 @@ class BYOLTrainer:
         for epoch_counter in range(self.max_epochs):
 
             train_sampler.set_epoch(epoch_counter)
-            for (batch_view_1, batch_view_2), _ in pbar:
+            for (batch_view_1, batch_view_2), _ in train_loader:
 
                 batch_view_1 = batch_view_1.to(self.device)
                 batch_view_2 = batch_view_2.to(self.device)
@@ -84,7 +84,7 @@ class BYOLTrainer:
 
                 loss = self.update(batch_view_1, batch_view_2)
                 self.writer.add_scalar('loss', loss, global_step=niter)
-                pbar.set_postfix({'loss' : loss.item()})
+                #pbar.set_postfix({'loss' : loss.item()})
 
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -93,7 +93,7 @@ class BYOLTrainer:
                 self._update_target_network_parameters(epoch_counter)  # update the key encoder
                 niter += 1
 
-            print("End of epoch {}".format(epoch_counter))
+            print("End of epoch {}, loss : {}".format(epoch_counter, loss.item()))
             
             self.adjust_learning_rate(epoch_counter)
             
