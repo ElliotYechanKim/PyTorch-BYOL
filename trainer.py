@@ -6,10 +6,11 @@ from torch.utils.data.dataloader import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from utils import _create_model_training_folder
-
+import math
+from tqdm import tqdm
 
 class BYOLTrainer:
-    def __init__(self, online_network, target_network, predictor, optimizer, device, **params):
+    def __init__(self, online_network, target_network, predictor, optimizer, device, args, scheduler, **params):
         self.online_network = online_network
         self.target_network = target_network
         self.optimizer = optimizer
@@ -21,15 +22,20 @@ class BYOLTrainer:
         self.batch_size = params['batch_size']
         self.num_workers = params['num_workers']
         self.checkpoint_interval = params['checkpoint_interval']
+        self.gpu = args.gpu
+        self.warmup_epochs = params['warmup_epochs']
+        self.scheduler = scheduler
+        self.lr = args.lr
         _create_model_training_folder(self.writer, files_to_same=["./config/config.yaml", "main.py", 'trainer.py'])
 
     @torch.no_grad()
-    def _update_target_network_parameters(self):
+    def _update_target_network_parameters(self, epoch):
         """
         Momentum update of the key encoder
         """
+        new_m = 1. - (1. - self.m) * (1. + math.cos(math.pi * epoch / self.max_epochs)) * 0.5
         for param_q, param_k in zip(self.online_network.parameters(), self.target_network.parameters()):
-            param_k.data = param_k.data * self.m + param_q.data * (1. - self.m)
+            param_k.data = param_k.data * new_m + param_q.data * (1. - new_m)
 
     @staticmethod
     def regression_loss(x, y):
@@ -44,10 +50,14 @@ class BYOLTrainer:
             param_k.requires_grad = False  # not update by gradient
 
     def train(self, train_dataset):
+        
+        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
 
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size,
-                                  num_workers=self.num_workers, drop_last=False, shuffle=True)
+                                  num_workers=self.num_workers, drop_last=False, shuffle=False, 
+                                  sampler = train_sampler, pin_memory = True)
 
+        pbar = tqdm(train_loader)
         niter = 0
         model_checkpoints_folder = os.path.join(self.writer.log_dir, 'checkpoints')
 
@@ -55,7 +65,8 @@ class BYOLTrainer:
 
         for epoch_counter in range(self.max_epochs):
 
-            for (batch_view_1, batch_view_2), _ in train_loader:
+            train_sampler.set_epoch(epoch_counter)
+            for (batch_view_1, batch_view_2), _ in pbar:
 
                 batch_view_1 = batch_view_1.to(self.device)
                 batch_view_2 = batch_view_2.to(self.device)
@@ -69,18 +80,22 @@ class BYOLTrainer:
 
                 loss = self.update(batch_view_1, batch_view_2)
                 self.writer.add_scalar('loss', loss, global_step=niter)
+                pbar.set_postfix({'loss' : loss.item()})
 
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
 
-                self._update_target_network_parameters()  # update the key encoder
+                self._update_target_network_parameters(epoch_counter)  # update the key encoder
                 niter += 1
 
             print("End of epoch {}".format(epoch_counter))
-
-        # save checkpoints
-        self.save_model(os.path.join(model_checkpoints_folder, 'model.pth'))
+            
+            self.adjust_learning_rate(epoch_counter)
+            
+            # save checkpoints
+            if epoch_counter % self.checkpoint_interval == 0 and self.gpu == 0:
+                self.save_model(os.path.join(model_checkpoints_folder, f'model{epoch_counter}.pth'))
 
     def update(self, batch_view_1, batch_view_2):
         # compute query feature
@@ -95,6 +110,15 @@ class BYOLTrainer:
         loss = self.regression_loss(predictions_from_view_1, targets_to_view_1)
         loss += self.regression_loss(predictions_from_view_2, targets_to_view_2)
         return loss.mean()
+
+    def adjust_learning_rate(self, epoch):
+        """Decays the learning rate with half-cycle cosine after warmup"""
+        if epoch < self.warmup_epochs:
+            lr = self.lr * epoch / self.warmup_epochs
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = lr
+        else:
+            self.scheduler.step()
 
     def save_model(self, PATH):
 
