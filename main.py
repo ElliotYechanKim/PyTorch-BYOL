@@ -21,6 +21,7 @@ torch.manual_seed(0)
 parser = ArgumentParser()
 parser.add_argument('--datadir', type=str, default='/home/ykim/data/imagenet/')
 parser.add_argument('--num-gpus', type=int)
+parser.add_argument('--vessl', action='store_true')
 args = parser.parse_args()
 
 class ImageNet100(datasets.ImageFolder):

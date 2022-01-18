@@ -9,10 +9,6 @@ from utils import _create_model_training_folder
 import math
 from tqdm import tqdm
 
-import vessl
-
-vessl.init(tensorboard=True)
-
 class BYOLTrainer:
     def __init__(self, online_network, target_network, predictor, optimizer, device, args, scheduler, **params):
         self.online_network = online_network
@@ -21,6 +17,10 @@ class BYOLTrainer:
         self.device = device
         self.predictor = predictor
         self.max_epochs = params['max_epochs']
+        
+        if args.vessl:
+            import vessl
+            vessl.init(tensorboard=True)
         self.writer = SummaryWriter()
         self.m = params['m']
         self.batch_size = params['batch_size']
@@ -63,27 +63,31 @@ class BYOLTrainer:
 
        #pbar = tqdm(train_loader)
         niter = 0
-        model_checkpoints_folder = os.path.join(self.writer.log_dir, 'checkpoints')
+        if self.gpu == 0:
+            model_checkpoints_folder = os.path.join(self.writer.log_dir, 'checkpoints')
 
         self.initializes_target_network()
 
         for epoch_counter in range(self.max_epochs):
 
             train_sampler.set_epoch(epoch_counter)
+
+            print(len(train_loader))
             for (batch_view_1, batch_view_2), _ in train_loader:
 
                 batch_view_1 = batch_view_1.to(self.device)
                 batch_view_2 = batch_view_2.to(self.device)
 
-                if niter == 0:
-                    grid = torchvision.utils.make_grid(batch_view_1[:32])
-                    self.writer.add_image('views_1', grid, global_step=niter)
+                # if niter == 0 and self.gpu == 0:
+                #     grid = torchvision.utils.make_grid(batch_view_1[:32])
+                #     self.writer.add_image('views_1', grid, global_step=niter)
 
-                    grid = torchvision.utils.make_grid(batch_view_2[:32])
-                    self.writer.add_image('views_2', grid, global_step=niter)
+                #     grid = torchvision.utils.make_grid(batch_view_2[:32])
+                #     self.writer.add_image('views_2', grid, global_step=niter)
 
                 loss = self.update(batch_view_1, batch_view_2)
-                self.writer.add_scalar('loss', loss, global_step=niter)
+                if self.gpu == 0:
+                    self.writer.add_scalar('loss', loss, global_step=niter)
                 #pbar.set_postfix({'loss' : loss.item()})
 
                 self.optimizer.zero_grad()
@@ -91,6 +95,8 @@ class BYOLTrainer:
                 self.optimizer.step()
 
                 self._update_target_network_parameters(epoch_counter)  # update the key encoder
+                if self.gpu == 0 and niter % 100 == 0:
+                    print("Loss : {}".format(loss.item()))
                 niter += 1
 
             print("End of epoch {}, loss : {}".format(epoch_counter, loss.item()))
