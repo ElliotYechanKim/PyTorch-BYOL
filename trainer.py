@@ -9,6 +9,10 @@ from utils import _create_model_training_folder
 import math
 from tqdm import tqdm
 
+import vessl
+
+vessl.init(tensorboard=True)
+
 class BYOLTrainer:
     def __init__(self, online_network, target_network, predictor, optimizer, device, args, scheduler, **params):
         self.online_network = online_network
