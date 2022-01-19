@@ -22,6 +22,7 @@ parser = ArgumentParser()
 parser.add_argument('--datadir', type=str, default='/home/ykim/data/imagenet/')
 parser.add_argument('--num-gpus', type=int)
 parser.add_argument('--vessl', action='store_true')
+parser.add_argument('--accum', type=int)
 args = parser.parse_args()
 
 class ImageNet100(datasets.ImageFolder):
@@ -136,7 +137,7 @@ def main_ddp(rank, world_size):
     predictor = torch.nn.SyncBatchNorm.convert_sync_batchnorm(predictor)
     target_network = torch.nn.SyncBatchNorm.convert_sync_batchnorm(target_network)
 
-    torch.cuda.set_device(args.gpu)
+    # torch.cuda.set_device(args.gpu)
     # When using a single GPU per process and per
     # DistributedDataParallel, we need to divide the batch size
     # ourselves based on the total number of GPUs we have
@@ -149,9 +150,6 @@ def main_ddp(rank, world_size):
     args.lr = config['optimizer']['params']['lr']
 
     config['trainer']['batch_size'] = int(config['trainer']['batch_size'] // world_size)
-
-    # optimizer = torch.optim.SGD(list(online_network.parameters()) + list(predictor.parameters()),
-    #                             **config['optimizer']['params'])
 
     optimizer = LARS(list(online_network.parameters()) + list(predictor.parameters()), **config['optimizer']['params'])
     

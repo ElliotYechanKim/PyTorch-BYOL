@@ -29,6 +29,7 @@ class BYOLTrainer:
         self.warmup_epochs = params['warmup_epochs']
         self.scheduler = scheduler
         self.lr = args.lr
+        self.accumulation_steps = args.accum
         if self.writer:
             _create_model_training_folder(self.writer, files_to_same=["./config/config.yaml", "main.py", 'trainer.py'])
 
@@ -56,10 +57,13 @@ class BYOLTrainer:
     def train(self, train_dataset):
         
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
-
+        
+        self.batch_size = int(self.batch_size / self.accumulation_steps)
+        print(f"Adjusted batch size : {self.batch_size}")
+        
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size,
                                   num_workers=self.num_workers, drop_last=False, shuffle=False, 
-                                  sampler = train_sampler, pin_memory = True)
+                                  sampler = train_sampler)
 
        #pbar = tqdm(train_loader)
         niter = 0
@@ -72,8 +76,7 @@ class BYOLTrainer:
 
             train_sampler.set_epoch(epoch_counter)
 
-            #print(len(train_loader))
-            for (batch_view_1, batch_view_2), _ in train_loader:
+            for i, ((batch_view_1, batch_view_2), _) in enumerate(train_loader):
 
                 batch_view_1 = batch_view_1.to(self.device)
                 batch_view_2 = batch_view_2.to(self.device)
@@ -86,18 +89,18 @@ class BYOLTrainer:
                 #     self.writer.add_image('views_2', grid, global_step=niter)
 
                 loss = self.update(batch_view_1, batch_view_2)
-                if self.gpu == 0:
-                    self.writer.add_scalar('loss', loss.item(), global_step=niter)
-                #pbar.set_postfix({'loss' : loss.item()})
-
-                self.optimizer.zero_grad()
+                loss = loss / self.accumulation_steps
                 loss.backward()
-                self.optimizer.step()
-
-                self._update_target_network_parameters(epoch_counter)  # update the key encoder
-                if self.gpu == 0 and niter % 100 == 0:
-                    print("Loss on {}: {}".format(niter, loss.item()))
-                niter += 1
+                #pbar.set_postfix({'loss' : loss.item()})
+                if (i+1) % self.accumulation_steps == 0:             # Wait for several backward steps
+                    if self.gpu == 0:
+                        self.writer.add_scalar('loss', loss.item(), global_step=niter)
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
+                    self._update_target_network_parameters(epoch_counter)  # update the key encoder
+                    if self.gpu == 0 and niter % 100 == 0:
+                        print("Loss on {}: {}".format(niter, loss.item()))
+                    niter += 1
 
             print("End of epoch {}, loss : {}".format(epoch_counter, loss.item()))
             
