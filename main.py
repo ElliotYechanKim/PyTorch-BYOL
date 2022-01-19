@@ -4,8 +4,11 @@ from subprocess import getoutput
 import torch
 import yaml
 from torchvision import datasets
+
 from data.multi_view_data_injector import MultiViewDataInjector
 from data.transforms import get_simclr_data_transforms
+from data.loader import TwoCropsTransform, GaussianBlur, Solarize
+import torchvision.transforms as transforms
 from models.mlp_head import MLPHead
 from models.resnet_base_network import ResNet18
 from trainer import BYOLTrainer
@@ -88,27 +91,59 @@ def main_ddp(rank, world_size):
     args.gpu = rank
     print(f"rank : {rank}, world_size : {world_size}")
 
-    dist.init_process_group(backend='gloo', rank=rank, world_size=world_size)
+    torch.cuda.set_device(args.gpu)
+    torch.cuda.empty_cache()
 
-    if args.gpu != 0:
-        def print_pass(*args):
-            pass
-        builtins.print = print_pass
+    dist.init_process_group(backend='nccl', rank=rank, world_size=world_size)
 
     config = yaml.load(open("./config/config.yaml", "r"), Loader=yaml.FullLoader)
 
     device = f'cuda:{args.gpu}'
     print(f"Training with: {device}")
 
-    data_transform = get_simclr_data_transforms(**config['data_transforms'])
+    if args.gpu != 0:
+        def print_pass(*args):
+            pass
+        builtins.print = print_pass
 
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+
+    # follow BYOL's augmentation recipe: https://arxiv.org/abs/2006.07733
+    augmentation1 = [
+        transforms.RandomResizedCrop(224, scale=(0.08, 1.)),
+        transforms.RandomApply([
+            transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)  # not strengthened
+        ], p=0.8),
+        transforms.RandomGrayscale(p=0.2),
+        transforms.RandomApply([GaussianBlur([.1, 2.])], p=1.0),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        normalize
+    ]
+
+    augmentation2 = [
+        transforms.RandomResizedCrop(224, scale=(0.08, 1.)),
+        transforms.RandomApply([
+            transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)  # not strengthened
+        ], p=0.8),
+        transforms.RandomGrayscale(p=0.2),
+        transforms.RandomApply([GaussianBlur([.1, 2.])], p=0.1),
+        transforms.RandomApply([Solarize()], p=0.2),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        normalize
+    ]
+
+    # data_transform = get_simclr_data_transforms(**config['data_transforms'])
     # train_dataset = datasets.STL10('/home/thalles/Downloads/', split='train+unlabeled', download=True,
     #                                transform=MultiViewDataInjector([data_transform, data_transform]))
 
-    train_dataset =  ImageNet100(args.datadir, split='train', transform=MultiViewDataInjector([data_transform, data_transform]))
+    train_dataset =  ImageNet100(args.datadir, split='train', 
+                                transform=TwoCropsTransform(transforms.Compose(augmentation1), transforms.Compose(augmentation2)))
     
     # online network
-    online_network = ResNet18(**config['network']).to(device)
+    online_network = ResNet18(**config['network'])
     
     # pretrained_folder = config['network']['fine_tune_from']
 
@@ -128,16 +163,18 @@ def main_ddp(rank, world_size):
 
     # predictor network
     predictor = MLPHead(in_channels=online_network.projetion.net[-1].out_features,
-                        **config['network']['projection_head']).to(device)
+                        **config['network']['projection_head'])
 
     # target encoder
-    target_network = ResNet18(**config['network']).to(device)
+    target_network = ResNet18(**config['network'])
 
     online_network = torch.nn.SyncBatchNorm.convert_sync_batchnorm(online_network)
     predictor = torch.nn.SyncBatchNorm.convert_sync_batchnorm(predictor)
     target_network = torch.nn.SyncBatchNorm.convert_sync_batchnorm(target_network)
 
-    # torch.cuda.set_device(args.gpu)
+    online_network.to(args.gpu)
+    predictor.to(args.gpu)
+    target_network.to(args.gpu)
     # When using a single GPU per process and per
     # DistributedDataParallel, we need to divide the batch size
     # ourselves based on the total number of GPUs we have
@@ -159,7 +196,6 @@ def main_ddp(rank, world_size):
                           target_network=target_network,
                           optimizer=optimizer,
                           predictor=predictor,
-                          device=device,
                           args = args,
                           scheduler = scheduler,
                           **config['trainer'])

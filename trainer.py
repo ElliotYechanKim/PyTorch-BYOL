@@ -10,11 +10,10 @@ import math
 from tqdm import tqdm
 
 class BYOLTrainer:
-    def __init__(self, online_network, target_network, predictor, optimizer, device, args, scheduler, **params):
+    def __init__(self, online_network, target_network, predictor, optimizer, args, scheduler, **params):
         self.online_network = online_network
         self.target_network = target_network
         self.optimizer = optimizer
-        self.device = device
         self.predictor = predictor
         self.max_epochs = params['max_epochs']
         
@@ -42,8 +41,7 @@ class BYOLTrainer:
         for param_q, param_k in zip(self.online_network.parameters(), self.target_network.parameters()):
             param_k.data = param_k.data * new_m + param_q.data * (1. - new_m)
 
-    @staticmethod
-    def regression_loss(x, y):
+    def regression_loss(self, x, y):
         x = F.normalize(x, dim=1)
         y = F.normalize(y, dim=1)
         return 2 - 2 * (x * y).sum(dim=-1)
@@ -77,9 +75,8 @@ class BYOLTrainer:
             train_sampler.set_epoch(epoch_counter)
 
             for i, ((batch_view_1, batch_view_2), _) in enumerate(train_loader):
-
-                batch_view_1 = batch_view_1.to(self.device)
-                batch_view_2 = batch_view_2.to(self.device)
+                batch_view_1 = batch_view_1.to(self.gpu)
+                batch_view_2 = batch_view_2.to(self.gpu)
 
                 # if niter == 0 and self.gpu == 0:
                 #     grid = torchvision.utils.make_grid(batch_view_1[:32])
