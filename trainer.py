@@ -104,7 +104,7 @@ class BYOLTrainer:
             self.adjust_learning_rate(epoch_counter)
             
             # save checkpoints
-            if epoch_counter % self.checkpoint_interval == 0 and self.gpu == 0:
+            if self.gpu == 0:
                 self.save_model(os.path.join(model_checkpoints_folder, f'model{epoch_counter}.pth'))
 
     def update(self, batch_view_1, batch_view_2):
