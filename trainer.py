@@ -89,17 +89,17 @@ class BYOLTrainer:
                 loss = loss / self.accumulation_steps
                 loss.backward()
                 #pbar.set_postfix({'loss' : loss.item()})
-                if (i+1) % self.accumulation_steps == 0:             # Wait for several backward steps
+                if (i + 1) % self.accumulation_steps == 0 or ((i + 1) == len(train_loader)):             # Wait for several backward steps
                     if self.gpu == 0:
-                        self.writer.add_scalar('loss', loss.item(), global_step=niter)
+                        self.writer.add_scalar('loss', (loss.item() * self.accumulation_steps), global_step=niter)
                     self.optimizer.step()
                     self.optimizer.zero_grad()
                     self._update_target_network_parameters(epoch_counter)  # update the key encoder
                     if self.gpu == 0 and niter % 100 == 0:
-                        print("Loss on {}: {}".format(niter, loss.item()))
+                        print("Loss on {}: {}".format(niter, (loss.item() * self.accumulation_steps)))
                     niter += 1
 
-            print("End of epoch {}, loss : {}".format(epoch_counter, loss.item()))
+            print("End of epoch {}, loss : {}".format(epoch_counter, (loss.item() * self.accumulation_steps)))
             
             self.adjust_learning_rate(epoch_counter)
             
