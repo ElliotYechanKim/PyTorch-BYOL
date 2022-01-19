@@ -25,7 +25,7 @@ parser = ArgumentParser()
 parser.add_argument('--datadir', type=str, default='/home/ykim/data/imagenet/')
 parser.add_argument('--num-gpus', type=int)
 parser.add_argument('--vessl', action='store_true')
-parser.add_argument('--accum', type=int)
+parser.add_argument('--accum', type=int, default=1)
 args = parser.parse_args()
 
 class ImageNet100(datasets.ImageFolder):
