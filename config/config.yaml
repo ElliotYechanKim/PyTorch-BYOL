@@ -16,7 +16,7 @@ trainer:
   batch_size: 4096
   m: 0.996 # momentum update
   max_epochs: 1000
-  num_workers: 8
+  num_workers: 4
   warmup_epochs: 10
 
 optimizer:
