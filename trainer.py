@@ -25,7 +25,6 @@ class BYOLTrainer:
         self.m = params['m']
         self.batch_size = params['batch_size']
         self.num_workers = params['num_workers']
-        self.checkpoint_interval = params['checkpoint_interval']
         self.gpu = args.gpu
         self.warmup_epochs = params['warmup_epochs']
         self.scheduler = scheduler
