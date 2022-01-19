@@ -21,7 +21,7 @@ class BYOLTrainer:
         if args.vessl:
             import vessl
             vessl.init(tensorboard=True)
-        self.writer = SummaryWriter()
+        self.writer = SummaryWriter() if args.gpu == 0 else None
         self.m = params['m']
         self.batch_size = params['batch_size']
         self.num_workers = params['num_workers']
@@ -30,7 +30,8 @@ class BYOLTrainer:
         self.warmup_epochs = params['warmup_epochs']
         self.scheduler = scheduler
         self.lr = args.lr
-        _create_model_training_folder(self.writer, files_to_same=["./config/config.yaml", "main.py", 'trainer.py'])
+        if self.writer:
+            _create_model_training_folder(self.writer, files_to_same=["./config/config.yaml", "main.py", 'trainer.py'])
 
     @torch.no_grad()
     def _update_target_network_parameters(self, epoch):
@@ -72,7 +73,7 @@ class BYOLTrainer:
 
             train_sampler.set_epoch(epoch_counter)
 
-            print(len(train_loader))
+            #print(len(train_loader))
             for (batch_view_1, batch_view_2), _ in train_loader:
 
                 batch_view_1 = batch_view_1.to(self.device)
@@ -87,7 +88,8 @@ class BYOLTrainer:
 
                 loss = self.update(batch_view_1, batch_view_2)
                 if self.gpu == 0:
-                    self.writer.add_scalar('loss', loss, global_step=niter)
+                    print("whyyyyy")
+                    self.writer.add_scalar('loss', loss.item(), global_step=niter)
                 #pbar.set_postfix({'loss' : loss.item()})
 
                 self.optimizer.zero_grad()
@@ -96,7 +98,7 @@ class BYOLTrainer:
 
                 self._update_target_network_parameters(epoch_counter)  # update the key encoder
                 if self.gpu == 0 and niter % 100 == 0:
-                    print("Loss : {}".format(loss.item()))
+                    print("Loss on {}: {}".format(niter, loss.item()))
                 niter += 1
 
             print("End of epoch {}, loss : {}".format(epoch_counter, loss.item()))
@@ -106,6 +108,9 @@ class BYOLTrainer:
             # save checkpoints
             if self.gpu == 0:
                 self.save_model(os.path.join(model_checkpoints_folder, f'model{epoch_counter}.pth'))
+        
+        if self.gpu == 0:
+            self.writer.close()
 
     def update(self, batch_view_1, batch_view_2):
         # compute query feature
