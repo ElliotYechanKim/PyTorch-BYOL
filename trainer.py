@@ -88,7 +88,6 @@ class BYOLTrainer:
 
                 loss = self.update(batch_view_1, batch_view_2)
                 if self.gpu == 0:
-                    print("whyyyyy")
                     self.writer.add_scalar('loss', loss.item(), global_step=niter)
                 #pbar.set_postfix({'loss' : loss.item()})
 
