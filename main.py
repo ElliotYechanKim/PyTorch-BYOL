@@ -23,7 +23,6 @@ torch.manual_seed(0)
 
 parser = ArgumentParser()
 parser.add_argument('--datadir', type=str, default='/home/ykim/data/imagenet/')
-parser.add_argument('--num-gpus', type=int)
 parser.add_argument('--vessl', action='store_true')
 parser.add_argument('--accum', type=int, default=1)
 args = parser.parse_args()
@@ -209,4 +208,4 @@ def run_demo(demo_fn, world_size):
              join=True)
 
 if __name__ == '__main__':
-    run_demo(main_ddp, args.num_gpus)
+    run_demo(main_ddp, torch.cuda.device_count())
