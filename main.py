@@ -182,6 +182,8 @@ def main_ddp(rank, world_size):
     predictor = torch.nn.parallel.DistributedDataParallel(predictor, device_ids=[args.gpu])
     target_network = torch.nn.parallel.DistributedDataParallel(target_network, device_ids=[args.gpu])
 
+    print("network initialization finished")
+    
     config['optimizer']['params']['lr'] = config['optimizer']['params']['lr'] * config['trainer']['batch_size'] / 256
     args.lr = config['optimizer']['params']['lr']
 
