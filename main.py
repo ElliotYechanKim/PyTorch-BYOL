@@ -25,6 +25,26 @@ parser = ArgumentParser()
 parser.add_argument('--datadir', type=str, default='/home/ykim/data/imagenet/')
 parser.add_argument('--vessl', action='store_true')
 parser.add_argument('--accum', type=int, default=1)
+
+#Network args
+parser.add_argument('--name', type=str, default="resnet18")
+parser.add_argument('--hidden-dim', type=int, default=512)
+parser.add_argument('--proj-size', type=int, default=128)
+parser.add_argument('--batch-size', type=int, default=1024)
+
+#Trainer args
+parser.add_argument('--max-epochs', type=int, default=200)
+parser.add_argument('--warmup-epochs', type=int, default=10)
+parser.add_argument('--num-workers', type=int, default=8)
+parser.add_argument('--m', type=float, default=0.996)
+
+#Optimizer args
+parser.add_argument('--lr', type=float, default=0.2)
+parser.add_argument('--wd', type=float, default=1.5e-6)
+parser.add_argument('--momentum', type=float, default=0.9)
+parser.add_argument('--t', type=float, default=0.001, help="trust_coefficient")
+
+parser.add_argument('--print-freq', type=int, default=10, help="print frequency")
 args = parser.parse_args()
 
 class ImageNet100(datasets.ImageFolder):
@@ -95,8 +115,6 @@ def main_ddp(rank, world_size):
 
     dist.init_process_group(backend='nccl', rank=rank, world_size=world_size)
 
-    config = yaml.load(open("./config/config.yaml", "r"), Loader=yaml.FullLoader)
-
     device = f'cuda:{args.gpu}'
     print(f"Training with: {device}")
 
@@ -142,7 +160,7 @@ def main_ddp(rank, world_size):
                                 transform=TwoCropsTransform(transforms.Compose(augmentation1), transforms.Compose(augmentation2)))
     
     # online network
-    online_network = ResNet18(**config['network'])
+    online_network = ResNet18(args.name, args.hidden_dim, args.proj_size)
     
     # pretrained_folder = config['network']['fine_tune_from']
 
@@ -162,10 +180,10 @@ def main_ddp(rank, world_size):
 
     # predictor network
     predictor = MLPHead(in_channels=online_network.projetion.net[-1].out_features,
-                        **config['network']['projection_head'])
+                        mlp_hidden_size = args.hidden_dim, projection_size = args.proj_size)
 
     # target encoder
-    target_network = ResNet18(**config['network'])
+    target_network = ResNet18(args.name, args.hidden_dim, args.proj_size)
 
     online_network = torch.nn.SyncBatchNorm.convert_sync_batchnorm(online_network)
     predictor = torch.nn.SyncBatchNorm.convert_sync_batchnorm(predictor)
@@ -184,22 +202,20 @@ def main_ddp(rank, world_size):
 
     print("network initialization finished")
     
-    config['optimizer']['params']['lr'] = config['optimizer']['params']['lr'] * config['trainer']['batch_size'] / 256
-    args.lr = config['optimizer']['params']['lr']
+    args.lr = args.lr * args.batch_size / 256
+    args.batch_size = int(args.batch_size // world_size)
 
-    config['trainer']['batch_size'] = int(config['trainer']['batch_size'] // world_size)
-
-    optimizer = LARS(list(online_network.parameters()) + list(predictor.parameters()), **config['optimizer']['params'])
+    optimizer = LARS(list(online_network.parameters()) + list(predictor.parameters()), 
+                        lr=args.lr, weight_decay=args.wd, momentum=args.momentum, trust_coefficient=args.t)
     
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, config['trainer']['max_epochs'] - config['trainer']['warmup_epochs'])
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.max_epochs - args.warmup_epochs)
 
     trainer = BYOLTrainer(online_network=online_network,
                           target_network=target_network,
                           optimizer=optimizer,
                           predictor=predictor,
                           args = args,
-                          scheduler = scheduler,
-                          **config['trainer'])
+                          scheduler = scheduler)
     
     trainer.train(train_dataset)
 

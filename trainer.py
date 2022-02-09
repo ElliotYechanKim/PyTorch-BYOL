@@ -10,27 +10,28 @@ import math
 from tqdm import tqdm
 
 class BYOLTrainer:
-    def __init__(self, online_network, target_network, predictor, optimizer, args, scheduler, **params):
+    def __init__(self, online_network, target_network, predictor, optimizer, args, scheduler):
         self.online_network = online_network
         self.target_network = target_network
         self.optimizer = optimizer
         self.predictor = predictor
-        self.max_epochs = params['max_epochs']
+        self.max_epochs = args.max_epochs
         
         if args.vessl:
             import vessl
             vessl.init(tensorboard=True)
         self.writer = SummaryWriter() if args.gpu == 0 else None
-        self.m = params['m']
-        self.batch_size = params['batch_size']
-        self.num_workers = params['num_workers']
+        self.m = args.m
+        self.batch_size = args.batch_size
+        self.num_workers = args.num_workers
         self.gpu = args.gpu
-        self.warmup_epochs = params['warmup_epochs']
+        self.warmup_epochs = args.warmup_epochs
         self.scheduler = scheduler
         self.lr = args.lr
         self.accumulation_steps = args.accum
+        self.print_freq = args.print_freq
         if self.writer:
-            _create_model_training_folder(self.writer, files_to_same=["./config/config.yaml", "main.py", 'trainer.py'])
+            _create_model_training_folder(self.writer, files_to_same=["main.py", 'trainer.py'])
 
     @torch.no_grad()
     def _update_target_network_parameters(self, epoch):
@@ -95,10 +96,9 @@ class BYOLTrainer:
                     self.optimizer.step()
                     self.optimizer.zero_grad()
                     self._update_target_network_parameters(epoch_counter)  # update the key encoder
-                    if self.gpu == 0 and niter % 100 == 0:
+                    if self.gpu == 0 and niter % self.print_freq == 0:
                         print("Loss on {}: {}".format(niter, (loss.item() * self.accumulation_steps)))
                     niter += 1
-
             print("End of epoch {}, loss : {}".format(epoch_counter, (loss.item() * self.accumulation_steps)))
             
             self.adjust_learning_rate(epoch_counter)
