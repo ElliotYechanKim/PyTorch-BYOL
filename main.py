@@ -18,8 +18,17 @@ import torch.distributed as dist
 import sys
 import builtins
 
+
+random_seed = 0
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+import numpy as np
+np.random.seed(random_seed)
+torch.manual_seed(random_seed)
+import random
+random.seed(random_seed)
+
 sys.path.append('../')
-torch.manual_seed(0)
 
 parser = ArgumentParser()
 parser.add_argument('--datadir', type=str, default='/home/ykim/data/imagenet/')
@@ -45,6 +54,9 @@ parser.add_argument('--momentum', type=float, default=0.9)
 parser.add_argument('--t', type=float, default=0.001, help="trust_coefficient")
 
 parser.add_argument('--print-freq', type=int, default=10, help="print frequency")
+
+parser.add_argument('--single', action='store_true')
+parser.add_argument('--num-gpus', type=int, default=torch.cuda.device_count())
 args = parser.parse_args()
 
 class ImageNet100(datasets.ImageFolder):
@@ -112,7 +124,6 @@ def main_ddp(rank, world_size):
 
     torch.cuda.set_device(args.gpu)
     torch.cuda.empty_cache()
-
     dist.init_process_group(backend='nccl', rank=rank, world_size=world_size)
 
     device = f'cuda:{args.gpu}'
@@ -122,6 +133,16 @@ def main_ddp(rank, world_size):
         def print_pass(*args):
             pass
         builtins.print = print_pass
+    
+    # online network
+    online_network = ResNet18(args.name, args.hidden_dim, args.proj_size)
+
+    # predictor network
+    predictor = MLPHead(in_channels=online_network.projection.net[-1].out_features,
+                        mlp_hidden_size = args.hidden_dim, projection_size = args.proj_size)
+
+    # target encoder
+    target_network = ResNet18(args.name, args.hidden_dim, args.proj_size)
 
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
@@ -152,38 +173,9 @@ def main_ddp(rank, world_size):
         normalize
     ]
 
-    # data_transform = get_simclr_data_transforms(**config['data_transforms'])
-    # train_dataset = datasets.STL10('/home/thalles/Downloads/', split='train+unlabeled', download=True,
-    #                                transform=MultiViewDataInjector([data_transform, data_transform]))
-
     train_dataset =  ImageNet100(args.datadir, split='train', 
                                 transform=TwoCropsTransform(transforms.Compose(augmentation1), transforms.Compose(augmentation2)))
     
-    # online network
-    online_network = ResNet18(args.name, args.hidden_dim, args.proj_size)
-    
-    # pretrained_folder = config['network']['fine_tune_from']
-
-    # # load pre-trained model if defined
-    # if pretrained_folder:
-    #     try:
-    #         checkpoints_folder = os.path.join('./runs', pretrained_folder, 'checkpoints')
-
-    #         # load pre-trained parameters
-    #         load_params = torch.load(os.path.join(os.path.join(checkpoints_folder, 'model.pth')),
-    #                                  map_location=torch.device(torch.device(device)))
-
-    #         online_network.load_state_dict(load_params['online_network_state_dict'])
-
-    #     except FileNotFoundError:
-    #         print("Pre-trained weights not found. Training from scratch.")
-
-    # predictor network
-    predictor = MLPHead(in_channels=online_network.projetion.net[-1].out_features,
-                        mlp_hidden_size = args.hidden_dim, projection_size = args.proj_size)
-
-    # target encoder
-    target_network = ResNet18(args.name, args.hidden_dim, args.proj_size)
 
     online_network = torch.nn.SyncBatchNorm.convert_sync_batchnorm(online_network)
     predictor = torch.nn.SyncBatchNorm.convert_sync_batchnorm(predictor)
@@ -225,5 +217,83 @@ def run_demo(demo_fn, world_size):
              nprocs=world_size,
              join=True)
 
+def main_single():
+
+    args.gpu = 0
+    device = f'cuda:{args.gpu}'
+    print(f"Training with: {device}")
+
+    # online network
+    online_network = ResNet18(args.name, args.hidden_dim, args.proj_size)
+
+    # predictor network
+    predictor = MLPHead(in_channels=online_network.projection.net[-1].out_features,
+                        mlp_hidden_size = args.hidden_dim, projection_size = args.proj_size)
+
+    # target encoder
+    target_network = ResNet18(args.name, args.hidden_dim, args.proj_size)
+
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+
+    # follow BYOL's augmentation recipe: https://arxiv.org/abs/2006.07733
+    augmentation1 = [
+        transforms.RandomResizedCrop(224, scale=(0.08, 1.)),
+        transforms.RandomApply([
+            transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)  # not strengthened
+        ], p=0.8),
+        transforms.RandomGrayscale(p=0.2),
+        transforms.RandomApply([GaussianBlur([.1, 2.])], p=1.0),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        normalize
+    ]
+
+    augmentation2 = [
+        transforms.RandomResizedCrop(224, scale=(0.08, 1.)),
+        transforms.RandomApply([
+            transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)  # not strengthened
+        ], p=0.8),
+        transforms.RandomGrayscale(p=0.2),
+        transforms.RandomApply([GaussianBlur([.1, 2.])], p=0.1),
+        transforms.RandomApply([Solarize()], p=0.2),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        normalize
+    ]
+
+    train_dataset =  ImageNet100(args.datadir, split='train', 
+                                transform=TwoCropsTransform(transforms.Compose(augmentation1), transforms.Compose(augmentation2)))
+
+    online_network = online_network.to_sequential().to(args.gpu)
+    predictor = predictor.to_sequential().to(args.gpu)
+    target_network = target_network.to_sequential().to(args.gpu)
+
+
+    # When using a single GPU per process and per
+    # DistributedDataParallel, we need to divide the batch size
+    # ourselves based on the total number of GPUs we have
+    print("network initialization finished")
+    
+    #args.lr = args.lr * args.batch_size / 256
+    optimizer = LARS(list(online_network.parameters()) + list(predictor.parameters()), 
+                        lr=args.lr, weight_decay=args.wd, momentum=args.momentum, trust_coefficient=args.t)
+    
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.max_epochs - args.warmup_epochs)
+    scheduler = None
+
+    trainer = BYOLTrainer(online_network=online_network,
+                          target_network=target_network,
+                          optimizer=optimizer,
+                          predictor=predictor,
+                          args = args,
+                          scheduler = scheduler)
+    
+    trainer.train(train_dataset)
+
 if __name__ == '__main__':
-    run_demo(main_ddp, torch.cuda.device_count())
+    if not args.single:
+        run_demo(main_ddp, args.num_gpus)
+    else:
+        main_single()
+    
