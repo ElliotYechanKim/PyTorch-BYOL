@@ -81,7 +81,9 @@ class BYOLTrainer:
 
             lr = self.adjust_learning_rate(epoch_counter + 1)
             m = self.adjust_momentum(epoch_counter)
-
+            if self.gpu == 0:
+                self.writer.add_scalar('learning_rate', lr, global_step=epoch_counter)
+                self.writer.add_scalar('momentum', m, global_step=epoch_counter)
             for i, ((batch_view_1, batch_view_2), _) in enumerate(train_loader):
                 
                 # print(f"input : {batch_view_1.norm()}")
@@ -90,12 +92,12 @@ class BYOLTrainer:
                 batch_view_1 = batch_view_1.to(self.gpu)
                 batch_view_2 = batch_view_2.to(self.gpu)
 
-                if self.gpu == 0 and niter == 8:
-                    grid = torchvision.utils.make_grid(batch_view_1[:32])
-                    self.writer.add_image('views_1', grid, global_step=niter)
+                # if self.gpu == 0 and niter == 8:
+                #     grid = torchvision.utils.make_grid(batch_view_1[:32])
+                #     self.writer.add_image('views_1', grid, global_step=niter)
 
-                    grid = torchvision.utils.make_grid(batch_view_2[:32])
-                    self.writer.add_image('views_2', grid, global_step=niter)
+                #     grid = torchvision.utils.make_grid(batch_view_2[:32])
+                #     self.writer.add_image('views_2', grid, global_step=niter)
 
                 loss = self.update(batch_view_1, batch_view_2)
                 loss = loss / self.accumulation_steps
@@ -110,11 +112,10 @@ class BYOLTrainer:
                     self.optimizer.step()
                     self.optimizer.zero_grad()
                     self._update_target_network_parameters()  # update the key encoder
-                    # if self.gpu == 0 and niter % self.print_freq == 0:
-                    #     print("Loss on {}: {}".format(niter, (loss.item() * self.accumulation_steps)))
+                    if self.gpu == 0 and niter % self.print_freq == 0:
+                        print("Loss on {}: {}".format(niter, (loss.item() * self.accumulation_steps)))
                     niter += 1
             print("End of epoch {}, loss : {}".format(epoch_counter, (loss.item() * self.accumulation_steps)))
-            
             # save checkpoints
             if self.gpu == 0:
                 self.save_model(os.path.join(model_checkpoints_folder, f'model{epoch_counter}.pth'))
@@ -201,7 +202,7 @@ class BYOLTrainer:
         if epoch < self.warmup_epochs:
             lr = self.lr * epoch / self.warmup_epochs
         else:
-            lr = self.lr * 0.5 * (1. + math.cos(math.pi * (epoch - self.warmup_epochs) / (self.params['max_epochs'] + 1 - self.warmup_epochs)))
+            lr = self.lr * 0.5 * (1. + math.cos(math.pi * (epoch - self.warmup_epochs) / (self.max_epochs + 1 - self.warmup_epochs)))
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
         return lr
