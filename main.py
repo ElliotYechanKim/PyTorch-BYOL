@@ -19,19 +19,20 @@ import sys
 import builtins
 
 
-random_seed = 0
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
-import numpy as np
-np.random.seed(random_seed)
-torch.manual_seed(random_seed)
-import random
-random.seed(random_seed)
+# random_seed = 0
+# torch.backends.cudnn.deterministic = True
+# torch.backends.cudnn.benchmark = False
+# import numpy as np
+# np.random.seed(random_seed)
+# torch.manual_seed(random_seed)
+# import random
+# random.seed(random_seed)
 
 sys.path.append('../')
 
 parser = ArgumentParser()
 parser.add_argument('--datadir', type=str, default='/home/ykim/data/imagenet/')
+parser.add_argument('--dataset', type=str, default='imagenet100')
 parser.add_argument('--vessl', action='store_true')
 parser.add_argument('--accum', type=int, default=1)
 
@@ -54,7 +55,6 @@ parser.add_argument('--momentum', type=float, default=0.9)
 parser.add_argument('--t', type=float, default=0.001, help="trust_coefficient")
 
 parser.add_argument('--print-freq', type=int, default=10, help="print frequency")
-
 parser.add_argument('--single', action='store_true')
 parser.add_argument('--num-gpus', type=int, default=torch.cuda.device_count())
 args = parser.parse_args()
@@ -63,6 +63,26 @@ class ImageNet100(datasets.ImageFolder):
     def __init__(self, root, split, transform):
         with open('./splits/imagenet100.txt') as f:
             classes = [line.strip() for line in f]
+            class_to_idx = { cls: idx for idx, cls in enumerate(classes) }
+
+        super().__init__(os.path.join(root, split), transform=transform)
+        samples = []
+        for path, label in self.samples:
+            cls = self.classes[label]
+            if cls not in class_to_idx:
+                continue
+            label = class_to_idx[cls]
+            samples.append((path, label))
+
+        self.samples = samples
+        self.classes = classes
+        self.class_to_idx = class_to_idx
+        self.targets = [s[1] for s in samples]
+
+class ImageNet1000(datasets.ImageFolder):
+    def __init__(self, root, split, transform):
+        with open('../splits/imagenet100.txt') as f:
+            classes = [line.strip().split(':')[0] for line in f]
             class_to_idx = { cls: idx for idx, cls in enumerate(classes) }
 
         super().__init__(os.path.join(root, split), transform=transform)
@@ -173,9 +193,12 @@ def main_ddp(rank, world_size):
         normalize
     ]
 
-    train_dataset =  ImageNet100(args.datadir, split='train', 
+    if args.dataset == 'imagenet100':
+        train_dataset =  ImageNet100(args.datadir, split='train', 
+                                    transform=TwoCropsTransform(transforms.Compose(augmentation1), transforms.Compose(augmentation2)))
+    elif args.dataset == 'imagenet1000':
+        train_dataset =  ImageNet1000(args.datadir, split='train', 
                                 transform=TwoCropsTransform(transforms.Compose(augmentation1), transforms.Compose(augmentation2)))
-    
 
     online_network = torch.nn.SyncBatchNorm.convert_sync_batchnorm(online_network)
     predictor = torch.nn.SyncBatchNorm.convert_sync_batchnorm(predictor)
@@ -262,7 +285,11 @@ def main_single():
         normalize
     ]
 
-    train_dataset =  ImageNet100(args.datadir, split='train', 
+    if args.dataset == 'imagenet100':
+        train_dataset =  ImageNet100(args.datadir, split='train', 
+                                    transform=TwoCropsTransform(transforms.Compose(augmentation1), transforms.Compose(augmentation2)))
+    elif args.dataset == 'imagenet1000':
+        train_dataset =  ImageNet1000(args.datadir, split='train', 
                                 transform=TwoCropsTransform(transforms.Compose(augmentation1), transforms.Compose(augmentation2)))
 
     online_network = online_network.to_sequential().to(args.gpu)
