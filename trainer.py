@@ -202,7 +202,7 @@ class BYOLTrainer:
         if epoch < self.warmup_epochs:
             lr = self.lr * epoch / self.warmup_epochs
         else:
-            lr = self.lr * 0.5 * (1. + math.cos(math.pi * (epoch - self.warmup_epochs) / (self.max_epochs + 1 - self.warmup_epochs)))
+            lr = self.lr * 0.5 * (1. + math.cos(math.pi * (epoch - self.warmup_epochs) / (self.max_epochs - self.warmup_epochs)))
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
         return lr
