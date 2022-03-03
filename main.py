@@ -79,7 +79,7 @@ class ImageNet100(datasets.ImageFolder):
         self.class_to_idx = class_to_idx
         self.targets = [s[1] for s in samples]
 
-class ImageNet1000(datasets.ImageFolder):
+class ImageNet1000(datasets.ImageNet):
     def __init__(self, root, split, transform):
         with open('./splits/imagenet1000.txt') as f:
             classes = [line.strip().split(':')[0] for line in f]
