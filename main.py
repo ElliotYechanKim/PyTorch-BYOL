@@ -11,7 +11,7 @@ from data.loader import TwoCropsTransform, GaussianBlur, Solarize
 import torchvision.transforms as transforms
 from models.mlp_head import MLPHead
 from models.resnet_base_network import ResNet18
-from trainer import BYOLTrainer
+from trainer import Trainer
 from argparse import ArgumentParser
 import torch.multiprocessing as mp
 import torch.distributed as dist
@@ -19,14 +19,14 @@ import sys
 import builtins
 
 
-# random_seed = 0
-# torch.backends.cudnn.deterministic = True
-# torch.backends.cudnn.benchmark = False
-# import numpy as np
-# np.random.seed(random_seed)
-# torch.manual_seed(random_seed)
-# import random
-# random.seed(random_seed)
+random_seed = 0
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+import numpy as np
+np.random.seed(random_seed)
+torch.manual_seed(random_seed)
+import random
+random.seed(random_seed)
 
 sys.path.append('../')
 
@@ -53,36 +53,23 @@ parser.add_argument('--lr', type=float, default=0.2)
 parser.add_argument('--wd', type=float, default=1.5e-6)
 parser.add_argument('--momentum', type=float, default=0.9)
 parser.add_argument('--t', type=float, default=0.001, help="trust_coefficient")
+parser.add_argument('--optimizer', type=str, default='LARS')
 
 parser.add_argument('--print-freq', type=int, default=10, help="print frequency")
 parser.add_argument('--single', action='store_true')
 parser.add_argument('--num-gpus', type=int, default=torch.cuda.device_count())
+parser.add_argument('--progressive', action='store_true')
+
+#Architecture args
+parser.add_argument('--moco', action='store_true')
+parser.add_argument('--moco-t', default=0.07, type=float,
+                    help='softmax temperature (default: 0.07)')
 args = parser.parse_args()
 
 class ImageNet100(datasets.ImageFolder):
     def __init__(self, root, split, transform):
         with open('./splits/imagenet100.txt') as f:
             classes = [line.strip() for line in f]
-            class_to_idx = { cls: idx for idx, cls in enumerate(classes) }
-
-        super().__init__(os.path.join(root, split), transform=transform)
-        samples = []
-        for path, label in self.samples:
-            cls = self.classes[label]
-            if cls not in class_to_idx:
-                continue
-            label = class_to_idx[cls]
-            samples.append((path, label))
-
-        self.samples = samples
-        self.classes = classes
-        self.class_to_idx = class_to_idx
-        self.targets = [s[1] for s in samples]
-
-class ImageNet1000(datasets.ImageNet):
-    def __init__(self, root, split, transform):
-        with open('./splits/imagenet1000.txt') as f:
-            classes = [line.strip().split(':')[0] for line in f]
             class_to_idx = { cls: idx for idx, cls in enumerate(classes) }
 
         super().__init__(os.path.join(root, split), transform=transform)
@@ -153,16 +140,16 @@ def main_ddp(rank, world_size):
         def print_pass(*args):
             pass
         builtins.print = print_pass
-    
+
     # online network
-    online_network = ResNet18(args.name, args.hidden_dim, args.proj_size)
+    online_network = ResNet18(args.name)
 
     # predictor network
     predictor = MLPHead(in_channels=online_network.projection.net[-1].out_features,
                         mlp_hidden_size = args.hidden_dim, projection_size = args.proj_size)
 
     # target encoder
-    target_network = ResNet18(args.name, args.hidden_dim, args.proj_size)
+    target_network = ResNet18(args.name)
 
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
@@ -197,9 +184,9 @@ def main_ddp(rank, world_size):
         train_dataset =  ImageNet100(args.datadir, split='train', 
                                     transform=TwoCropsTransform(transforms.Compose(augmentation1), transforms.Compose(augmentation2)))
     elif args.dataset == 'imagenet1000':
-        train_dataset =  ImageNet1000(args.datadir, split='train', 
-                                transform=TwoCropsTransform(transforms.Compose(augmentation1), transforms.Compose(augmentation2)))
-
+        train_dataset = datasets.ImageNet(args.datadir, split='train', 
+                                    transform=TwoCropsTransform(transforms.Compose(augmentation1), transforms.Compose(augmentation2)))
+    
     online_network = torch.nn.SyncBatchNorm.convert_sync_batchnorm(online_network)
     predictor = torch.nn.SyncBatchNorm.convert_sync_batchnorm(predictor)
     target_network = torch.nn.SyncBatchNorm.convert_sync_batchnorm(target_network)
@@ -221,16 +208,13 @@ def main_ddp(rank, world_size):
     args.batch_size = int(args.batch_size // world_size)
 
     optimizer = LARS(list(online_network.parameters()) + list(predictor.parameters()), 
-                        lr=args.lr, weight_decay=args.wd, momentum=args.momentum, trust_coefficient=args.t)
-    
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.max_epochs - args.warmup_epochs)
+                        lr=args.lr, weight_decay=args.wd)
 
-    trainer = BYOLTrainer(online_network=online_network,
+    trainer = Trainer(online_network=online_network,
                           target_network=target_network,
                           optimizer=optimizer,
                           predictor=predictor,
-                          args = args,
-                          scheduler = scheduler)
+                          args = args)
     
     trainer.train(train_dataset)
 
@@ -296,6 +280,7 @@ def main_single():
     predictor = predictor.to_sequential().to(args.gpu)
     target_network = target_network.to_sequential().to(args.gpu)
 
+    print(online_network)
 
     # When using a single GPU per process and per
     # DistributedDataParallel, we need to divide the batch size
@@ -309,7 +294,7 @@ def main_single():
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.max_epochs - args.warmup_epochs)
     scheduler = None
 
-    trainer = BYOLTrainer(online_network=online_network,
+    trainer = Trainer(online_network=online_network,
                           target_network=target_network,
                           optimizer=optimizer,
                           predictor=predictor,

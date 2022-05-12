@@ -8,12 +8,16 @@ class ResNetReshape(torch.nn.Module):
         return x.view(x.shape[0], x.shape[1])
 
 class ResNet18(torch.nn.Module):
-    def __init__(self, name, hidden_dim, proj_size):
+    def __init__(self, name):
         super(ResNet18, self).__init__()
         if name == 'resnet18':
             resnet = models.resnet18(pretrained=False)
+            hidden_dim = 512
+            proj_size = 128
         elif name == 'resnet50':
             resnet = models.resnet50(pretrained=False)
+            hidden_dim = 2048
+            proj_size = 256
 
         self.encoder = torch.nn.Sequential(*list(resnet.children())[:-1])
         self.projection = MLPHead(in_channels=resnet.fc.in_features, 
@@ -23,13 +27,6 @@ class ResNet18(torch.nn.Module):
 
     def forward(self, x):
         h = self.encoder(x)
-        #print(list(self.encoder.children())[:4])
-        # part1 = torch.nn.Sequential(*list(self.encoder.children())[:4])
-        # mid = part1(x)
-        # temp = mid.requires_grad_()
-        #temp.register_hook(lambda grad : print(f"grad : {grad.sum().item()}"))
-        # part2 = torch.nn.Sequential(*list(self.encoder.children())[4:])
-        # h = part2(mid)
         h = h.view(h.shape[0], h.shape[1])
         return self.projection(h)
 
