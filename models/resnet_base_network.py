@@ -12,16 +12,11 @@ class ResNet18(torch.nn.Module):
         super(ResNet18, self).__init__()
         if name == 'resnet18':
             resnet = models.resnet18(pretrained=False)
-            hidden_dim = 512
-            proj_size = 128
         elif name == 'resnet50':
             resnet = models.resnet50(pretrained=False)
-            hidden_dim = 2048
-            proj_size = 256
 
         self.encoder = torch.nn.Sequential(*list(resnet.children())[:-1])
-        self.projection = MLPHead(in_channels=resnet.fc.in_features, 
-                    mlp_hidden_size = hidden_dim, projection_size = proj_size)
+        self.projection = MLPHead(in_channels=resnet.fc.in_features, name=name)
         
         self.reshaper = ResNetReshape()
 

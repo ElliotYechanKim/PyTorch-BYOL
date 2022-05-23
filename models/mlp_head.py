@@ -1,9 +1,15 @@
 from torch import nn
 
-
 class MLPHead(nn.Module):
-    def __init__(self, in_channels, mlp_hidden_size, projection_size):
+    def __init__(self, in_channels, name):
         super(MLPHead, self).__init__()
+
+        if name == 'resnet18':
+            mlp_hidden_size = 512
+            projection_size = 128
+        elif name == 'resnet50':
+            mlp_hidden_size = 2048
+            projection_size = 256
 
         self.net = nn.Sequential(
             nn.Linear(in_channels, mlp_hidden_size),

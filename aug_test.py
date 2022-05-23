@@ -1,11 +1,17 @@
+from re import L
 import torch
 import torchvision
-from torchvision import datasets
 from argparse import ArgumentParser
 import torchvision.transforms as transforms
-from data.loader import TwoCropsTransform
+from data.loader import TwoCropsTransform, GaussianBlur, Solarize
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data import Dataset
+from scipy import interpolate
+from similarity import SimFilter
+from models.mlp_head import MLPHead
+from models.resnet_base_network import ResNet18
+import math
 
 random_seed = 0
 torch.backends.cudnn.deterministic = True
@@ -18,59 +24,101 @@ random.seed(random_seed)
 
 parser = ArgumentParser()
 parser.add_argument('--progressive', action='store_true')
+parser.add_argument('-b', '--batch-size', type=int, default=128)
+parser.add_argument('--max-epochs', type=int, default=40)
+parser.add_argument('--init_prob', type=float, default=0.2)
+parser.add_argument('--interpolate', type=str, default='linear')
+parser.add_argument('--name', type=str, default='resnet18')
+parser.add_argument('--filter-ratio', type=float, default=0.1)
+parser.add_argument('--sim-pretrained', action='store_true', help = 'Using pre-trained model to masuer the similarity')
 args = parser.parse_args()
 
-def main():
+class ProgressiveDataset(Dataset):
+    def __init__(self, dataset):
+        super(ProgressiveDataset, self).__init__()
+        self.dataset = dataset
+        self.interpolate_fucntion = self.get_inter_func()
+        self.increase_ratio(0)
+        print('progressivedataset initialized')
 
-    writer = SummaryWriter()
+    def __len__(self):
+        return self.dataset.__len__()
+    
+    def __getitem__(self, index):
+        return self.dataset.__getitem__(index)
 
-    if not args.progressive:
+    def get_inter_func(self):
+        x = np.linspace(0, args.max_epochs, num = 4)
+        y = np.linspace(args.init_prob, 1.0, num = 4)
+        print(args.interpolate)
+        return interpolate.interp1d(x, y, kind=args.interpolate)
+
+    def increase_ratio(self, epoch):
+        s = self.interpolate_fucntion(epoch)
+        # if writer:
+        #     writer.add_scalar('ratio', s, global_step=epoch)
+
+        mean = torch.tensor([0.43, 0.42, 0.39])
+        std  = torch.tensor([0.27, 0.26, 0.27])
+        normalize = transforms.Normalize(mean=mean, std=std)
+
         augmentation1 = [
-            transforms.RandomResizedCrop(64, scale=(0.7, 0.7), ratio = (1, 1)),
+            transforms.RandomResizedCrop(96, scale=(0.08, 1.)),
             # transforms.RandomApply([
-            #     transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)
+            #     transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)  # not strengthened
             # ], p=0.8),
             # transforms.RandomGrayscale(p=0.2),
             # transforms.RandomApply([GaussianBlur([.1, 2.])], p=1.0),
             # transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
-            # normalize
+            #normalize
         ]
 
         augmentation2 = [
-            transforms.RandomResizedCrop(64, scale=(0.7, 0.7), ratio = (1, 1)),
+            transforms.RandomResizedCrop(96, scale=(0.08, 1.)),
             # transforms.RandomApply([
-            #     transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)
+            #     transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)  # not strengthened
             # ], p=0.8),
             # transforms.RandomGrayscale(p=0.2),
             # transforms.RandomApply([GaussianBlur([.1, 2.])], p=0.1),
             # transforms.RandomApply([Solarize()], p=0.2),
             # transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
-            # normalize
+            #normalize
         ]
         transforms_func = TwoCropsTransform(transforms.Compose(augmentation1), transforms.Compose(augmentation2))
-    else:
-        augmentation1 = [
-            transforms.PILToTensor(),
-        ]
-        augmentation2 = [
-            transforms.PILToTensor(),
-        ]
-        transforms_func = TwoCropsTransform(transforms.Compose(augmentation1), transforms.Compose(augmentation2))
+        self.dataset.transform = transforms_func
 
-    train_dataset =  torchvision.datasets.STL10('/home/ykim/data/stl10', split='train+unlabeled', transform=transforms_func)
+def similarity_test():
 
-    train_loader = DataLoader(train_dataset, batch_size = 4, num_workers = 8, 
-                        drop_last = False, shuffle = True)
+    writer = SummaryWriter()
 
-    for i, ((batch_view_1, batch_view_2), _) in enumerate(train_loader):
-        if args.progressive:
-            batch_view_1, batch_view_2 = adjust_augment_ratio(batch_view_1, batch_view_2)
-        grid = torchvision.utils.make_grid(batch_view_1[:4])
-        writer.add_image('views_1', grid, global_step=i)
-        grid = torchvision.utils.make_grid(batch_view_2[:4])
-        writer.add_image('views_2', grid, global_step=i)
+    online_network = ResNet18(args.name)
+    predictor = MLPHead(in_channels=online_network.projection.net[-1].out_features, name=args.name)
+    simfilter = SimFilter(args, online_network)
+    
+    if args.progressive:
+        args.sigma3 = math.ceil(args.batch_size * 0.03)
+        args.orig_batch_size = args.batch_size
+        args.batch_size = int(args.batch_size / (1 - args.filter_ratio)) + 2 * args.sigma3
+
+    train_dataset =  torchvision.datasets.STL10('/home/ykim/data/stl10', split='train+unlabeled')
+    prog_train_dataset = ProgressiveDataset(train_dataset)
+    train_loader = DataLoader(prog_train_dataset, batch_size = args.batch_size, num_workers = 8, 
+                                            drop_last = False, shuffle = True)
+        
+    for epoch in range(args.max_epochs):
+        for i, ((batch_view_1, batch_view_2), _) in enumerate(train_loader):
+            print(batch_view_1.shape)
+            if args.sim_pretrained:
+                batch_view_1, batch_view_2 = simfilter.filter_by_similarity_ratio(batch_view_1, batch_view_2, epoch)
+            else:
+                batch_view_1, batch_view_2 = simfilter.filter_by_similarity_ratio(batch_view_1, batch_view_2, epoch)
+            print(batch_view_1.shape)
+            break
+        
+        if epoch != args.max_epochs - 1:
+            prog_train_dataset.increase_ratio(epoch + 1)
         break
 
 def adjust_augment_ratio(batch_view_1, batch_view_2):
@@ -119,5 +167,31 @@ def adjust_augment_ratio(batch_view_1, batch_view_2):
         ])
         return augmentation1(batch_view_1), augmentation2(batch_view_2)
 
+def interpolation_test():
+    linear = []
+    print('Linear interpolation TEST from 0 to 10')
+    for i in range(10):
+        s = args.init_prob + (1 - args.init_prob) / args.max_epochs * i
+        print(s)
+    
+    log_linear = []
+    print('Log Linear interpolation TEST from 0 to 10')
+    for i in range(10):
+        s = np.exp(np.log(args.init_prob) + (np.log(1 - args.init_prob) - np.log(args.init_prob)) / \
+                                                np.log(args.max_epochs) * np.log(i)) + args.init_prob
+        print(s)
+
+def sim_interpolation_test():
+
+    filter_ratio = 0.1
+    length = 120
+    batch_size = int(length * filter_ratio)
+        
+    reduce = length - batch_size
+    for i in range(10):
+        begin = int((len(processed_batch) - batch_size) * i / 10)
+        end = reduce - begin
+
+    processed_batch = processed_batch[begin : -end]
 if __name__ == '__main__':
-    main()
+    similarity_test()

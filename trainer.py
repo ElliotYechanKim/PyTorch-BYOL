@@ -10,16 +10,15 @@ import torchvision.transforms as transforms
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from kornia.augmentation.container import AugmentationSequential
-from data.loader import TwoCropsTransform, GaussianBlur, Solarize
 from utils import _create_model_training_folder
 from tqdm import tqdm
-
+from similarity import SimFilter
 class Trainer:
     def __init__(self, online_network, target_network, predictor, optimizer, args):
         self.online_network = online_network
         self.target_network = target_network
-        self.optimizer = optimizer
         self.predictor = predictor
+        self.optimizer = optimizer
         
         if args.vessl:
             import vessl
@@ -69,11 +68,14 @@ class Trainer:
             train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
         else:
             train_sampler = None
-
-        self.batch_size = int(self.args.batch_size / self.args.accum)
-        print(f"Adjusted batch size : {self.batch_size}")
         
-        train_loader = DataLoader(train_dataset, batch_size=self.batch_size,
+        if self.args.progressive:
+            self.args.sigma3 = math.ceil(self.args.batch_size * 0.03)
+            self.args.orig_batch_size = self.args.batch_size
+            self.args.batch_size = int(self.args.batch_size / (1 - self.args.filter_ratio)) + 2 * self.args.sigma3
+            simfilter = SimFilter(self.args)
+
+        train_loader = DataLoader(train_dataset, batch_size=self.args.batch_size,
                                   num_workers=self.args.num_workers, drop_last=False, shuffle=(train_sampler is None),
                                   sampler = train_sampler)
 
@@ -82,11 +84,6 @@ class Trainer:
             model_checkpoints_folder = os.path.join(self.writer.log_dir, 'checkpoints')
 
         self.initializes_target_network()
-
-
-        # if self.args.progressive:
-        #     adjust_period = self.args.max_epochs // self.args.num_stages
-        #     print(adjust_period)
         
         for epoch_counter in range(self.args.max_epochs):
             if not self.args.single:
@@ -98,7 +95,7 @@ class Trainer:
                 self.writer.add_scalar('learning_rate', lr, global_step=epoch_counter)
                 self.writer.add_scalar('momentum', m, global_step=epoch_counter)
             
-            niter = self.train_single(train_loader, niter, epoch_counter)
+            niter = self.train_single(train_loader, niter, epoch_counter, simfilter)
 
             if self.args.progressive:
                 train_dataset.increase_stage(epoch_counter + 1)
@@ -110,7 +107,7 @@ class Trainer:
         if self.args.gpu == 0:
             self.writer.close()
 
-    def train_single(self, train_loader, niter, epoch):
+    def train_single(self, train_loader, niter, epoch, simfiler):
         
         batch_time = AverageMeter('Time', ':6.3f')
         data_time = AverageMeter('Data', ':6.3f')
@@ -136,14 +133,14 @@ class Trainer:
             #                                         niter, len(train_loader), self.args.max_epochs)
             #     aug_time.update(time.time() - end)
                 
-            # if self.args.gpu == 0 and i == 0:
-            #     grid = torchvision.utils.make_grid(batch_view_1[:32])
-            #     self.writer.add_image('views_1', grid, global_step=epoch)
+            if self.args.gpu == 0 and i == 0:
+                grid = torchvision.utils.make_grid(batch_view_1[:32])
+                self.writer.add_image('views_1', grid, global_step=epoch)
 
-            #     grid = torchvision.utils.make_grid(batch_view_2[:32])
-            #     self.writer.add_image('views_2', grid, global_step=epoch)
+                grid = torchvision.utils.make_grid(batch_view_2[:32])
+                self.writer.add_image('views_2', grid, global_step=epoch)
         
-            loss = self.update(batch_view_1, batch_view_2)
+            loss = self.update(batch_view_1, batch_view_2, simfiler, epoch)
             loss = loss / self.args.accum
 
             loss.backward()
@@ -170,21 +167,28 @@ class Trainer:
         
         return niter
     
-    def update(self, batch_view_1, batch_view_2):
+    def update(self, batch_view_1, batch_view_2, simfilter, epoch):
+        if self.args.sim_pretrained:
+            batch_view_1, batch_view_2 = simfilter.filter_by_similarity_ratio(batch_view_1, batch_view_2, epoch)
+            with torch.no_grad():
+                targets_to_view_2 = self.target_network(batch_view_1)
+                targets_to_view_1 = self.target_network(batch_view_2)
+        else:
+            with torch.no_grad():
+                targets_to_view_2 = self.target_network(batch_view_1)
+                targets_to_view_1 = self.target_network(batch_view_2)
+            torch.cuda.synchronize()
+            batch_view_1, batch_view_2, targets_to_view_2, targets_to_view_1 = simfilter.filter_by_similarity_ratio( \
+                                                                                    batch_view_1, batch_view_2, epoch, \
+                                                                                    targets_to_view_2, targets_to_view_1)
+        
         if self.args.moco:
             predictions_from_view_1 = self.online_network(batch_view_1)
             predictions_from_view_2 = self.online_network(batch_view_2)
+            loss = self.contrastive_loss(predictions_from_view_1, predictions_from_view_2, targets_to_view_2, targets_to_view_1)
         else:
             predictions_from_view_1 = self.predictor(self.online_network(batch_view_1))
             predictions_from_view_2 = self.predictor(self.online_network(batch_view_2))
-        
-        with torch.no_grad():
-            targets_to_view_2 = self.target_network(batch_view_1)
-            targets_to_view_1 = self.target_network(batch_view_2)
-
-        if self.args.moco:
-            loss = self.contrastive_loss(predictions_from_view_1, predictions_from_view_2, targets_to_view_2, targets_to_view_1)
-        else:
             loss = self.regression_loss(predictions_from_view_1, targets_to_view_1)
             loss += self.regression_loss(predictions_from_view_2, targets_to_view_2)
             loss = loss.mean()
@@ -212,6 +216,7 @@ class Trainer:
             'optimizer_state_dict': self.optimizer.state_dict(),
         }, PATH)
 
+    #For interation ratio increases, this will be needed.
     def adjust_augment_ratio(self, batch_view_1, batch_view_2, niter, length, epochs):
         
         init_size = self.args.orig_size * self.args.init_prob
