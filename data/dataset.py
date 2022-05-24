@@ -16,7 +16,7 @@ class ProgressiveDataset(Dataset):
     def __getitem__(self, index):
         return self.dataset.__getitem__(index)
 
-    def increase_stage(self, epoch):
+    def increase_stage(self, epoch, writer=None):
 
         if self.args.interpolate == 'linear':
             s = self.args.init_prob + (self.args.max_prob - self.args.init_prob) / self.args.max_epochs * epoch
@@ -54,3 +54,8 @@ class ProgressiveDataset(Dataset):
         ]
         transforms_func = TwoCropsTransform(transforms.Compose(augmentation1), transforms.Compose(augmentation2))
         self.dataset.transform = transforms_func
+        
+        if writer:
+            writer.add_scalar('s', s, global_step=epoch)
+            writer.add_scalar('image size', self.args.orig_img_size * s, global_step=epoch)
+            writer.add_scalar('scale_lower', scale_lower, global_step=epoch)

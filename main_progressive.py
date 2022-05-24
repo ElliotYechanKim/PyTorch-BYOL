@@ -50,7 +50,7 @@ parser.add_argument('--num-workers', type=int, default=8)
 parser.add_argument('--print-freq', type=int, default=10, help="print frequency")
 
 #DDP args
-parser.add_argument('--single', action='store_true')
+parser.add_argument('--single', action='store_true', default=False)
 parser.add_argument('--num-gpus', type=int, default=torch.cuda.device_count())
 
 #Progressive args
@@ -101,11 +101,10 @@ def main_single():
         train_dataset =  datasets.ImageNet(args.datadir, split='train')
         args.orig_img_size = 224
     elif args.dataset == 'stl10':
-        train_dataset =  datasets.STL10(args.datadir, split='train')
+        train_dataset =  datasets.STL10(args.datadir, split='train+unlabeled')
         args.orig_img_size = 96
 
-    if args.progressive:
-        train_dataset = ProgressiveDataset(train_dataset)
+    train_dataset = ProgressiveDataset(train_dataset, args)
 
     # When using a single GPU per process and per
     # DistributedDataParallel, we need to divide the batch size
@@ -134,7 +133,7 @@ def main_single():
 
 def main_ddp(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
+    os.environ['MASTER_PORT'] = '12345'
 
     args.gpu = rank
     print(f"rank : {rank}, world_size : {world_size}")
@@ -186,8 +185,7 @@ def main_ddp(rank, world_size):
         train_dataset =  datasets.STL10(args.datadir, split='train+unlabeled')
         args.orig_img_size = 96
 
-    if args.progressive:
-        train_dataset = ProgressiveDataset(train_dataset, args)
+    train_dataset = ProgressiveDataset(train_dataset, args)
 
     #Lineary Scalining the learning rate
     args.lr = args.lr * args.batch_size / 256
@@ -195,6 +193,9 @@ def main_ddp(rank, world_size):
     # DistributedDataParallel, we need to divide the batch size
     # ourselves based on the total number of GPUs we have
     args.batch_size = int(args.batch_size // world_size)
+
+    # DDP, need to adjust workers
+    args.num_workers = int((args.num_workers + world_size - 1) / world_size)
 
     #Accumulate batches
     args.batch_size = int(args.batch_size / args.accum)

@@ -74,10 +74,12 @@ class Trainer:
             self.args.orig_batch_size = self.args.batch_size
             self.args.batch_size = int(self.args.batch_size / (1 - self.args.filter_ratio)) + 2 * self.args.sigma3
             simfilter = SimFilter(self.args)
-
+        else:
+            simfilter = None
+        
         train_loader = DataLoader(train_dataset, batch_size=self.args.batch_size,
-                                  num_workers=self.args.num_workers, drop_last=True, shuffle=(train_sampler is None),
-                                  sampler = train_sampler)
+                                  shuffle=(train_sampler is None), sampler = train_sampler,
+                                  num_workers=self.args.num_workers, drop_last=True)
 
         niter = 0
         if self.args.gpu == 0:
@@ -87,7 +89,7 @@ class Trainer:
         
         for epoch_counter in range(self.args.max_epochs):
             if not self.args.single:
-                train_sampler.set_epoch(epoch_counter)
+                train_loader.sampler.set_epoch(epoch_counter)
 
             lr = self.adjust_learning_rate(epoch_counter + 1)
             m = self.adjust_momentum(epoch_counter)
@@ -98,7 +100,7 @@ class Trainer:
             niter = self.train_single(train_loader, niter, epoch_counter, simfilter)
 
             if self.args.progressive and epoch_counter != self.args.max_epochs - 1:
-                train_dataset.increase_stage(epoch_counter + 1)
+                train_dataset.increase_stage(epoch_counter + 1, self.writer)
             
             # save checkpoints
             if self.args.gpu == 0:
@@ -134,10 +136,10 @@ class Trainer:
             #     aug_time.update(time.time() - end)
                 
             if self.args.gpu == 0 and i == 0:
-                grid = torchvision.utils.make_grid(batch_view_1[:32])
+                grid = torchvision.utils.make_grid(batch_view_1[:4].detach(), normalize=True)
                 self.writer.add_image('views_1', grid, global_step=epoch)
 
-                grid = torchvision.utils.make_grid(batch_view_2[:32])
+                grid = torchvision.utils.make_grid(batch_view_2[:4].detach(), normalize=True)
                 self.writer.add_image('views_2', grid, global_step=epoch)
         
             loss = self.update(batch_view_1, batch_view_2, simfiler, epoch)
@@ -158,29 +160,35 @@ class Trainer:
                 # measure elapsed time
                 batch_time.update(time.time() - end)
     
-
                 if self.args.gpu == 0 and i % self.args.print_freq == 0:
                     progress.display(i)
 
                 niter += 1
+
+                del loss
                 end = time.time()
         
         return niter
     
     def update(self, batch_view_1, batch_view_2, simfilter, epoch):
-
-        if self.args.sim_pretrained:
-            batch_view_1, batch_view_2 = simfilter.filter_by_similarity_ratio(batch_view_1, batch_view_2, epoch)
-            with torch.no_grad():
-                targets_to_view_2 = self.target_network(batch_view_1)
-                targets_to_view_1 = self.target_network(batch_view_2)
+        
+        if simfilter:
+            if self.args.sim_pretrained:
+                batch_view_1, batch_view_2 = simfilter.filter_by_similarity_ratio(batch_view_1, batch_view_2, epoch)
+                with torch.no_grad():
+                    targets_to_view_2 = self.target_network(batch_view_1)
+                    targets_to_view_1 = self.target_network(batch_view_2)
+            else:
+                with torch.no_grad():
+                    targets_to_view_2 = self.target_network(batch_view_1)
+                    targets_to_view_1 = self.target_network(batch_view_2)
+                batch_view_1, batch_view_2, targets_to_view_2, targets_to_view_1 = simfilter.filter_by_similarity_ratio( \
+                                                                                        batch_view_1, batch_view_2, epoch, \
+                                                                                        targets_to_view_2.detach(), targets_to_view_1.detach())
         else:
             with torch.no_grad():
                 targets_to_view_2 = self.target_network(batch_view_1)
                 targets_to_view_1 = self.target_network(batch_view_2)
-            batch_view_1, batch_view_2, targets_to_view_2, targets_to_view_1 = simfilter.filter_by_similarity_ratio( \
-                                                                                    batch_view_1, batch_view_2, epoch, \
-                                                                                    targets_to_view_2, targets_to_view_1)
         
         # print(batch_view_1.shape, batch_view_2.shape, targets_to_view_2.shape, targets_to_view_1.shape)
         # assert batch_view_1.shape == batch_view_2.shape 

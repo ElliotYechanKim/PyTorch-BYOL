@@ -59,7 +59,8 @@ class SimFilter:
         # similarity = self.calc_l2_similarity(batch[0])
         bool_rep = rep_1 is not None and rep_2 is not None
         if bool_rep:
-            similarity = torch.nn.functional.cosine_similarity(rep_1, rep_2)
+            with torch.no_grad():
+                similarity = torch.nn.functional.cosine_similarity(rep_1, rep_2)
         else:
             similarity = self.calc_cos_similarity([batch_view_1, batch_view_2])
         
@@ -92,8 +93,9 @@ class SimFilter:
             for v1, v2, _ in processed_rep:
                 rep_v1_list.append(v1)
                 rep_v2_list.append(v2)
+            del sorted_rep, processed_rep
             return torch.stack(v1_list), torch.stack(v2_list), torch.stack(rep_v1_list), torch.stack(rep_v2_list)
-        
+
         return torch.stack(v1_list), torch.stack(v2_list)
         
         #return ([[x[0] for x in processed_batch], [x[1] for x in processed_batch]])
