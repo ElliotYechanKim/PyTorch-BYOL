@@ -76,7 +76,7 @@ class Trainer:
             simfilter = SimFilter(self.args)
 
         train_loader = DataLoader(train_dataset, batch_size=self.args.batch_size,
-                                  num_workers=self.args.num_workers, drop_last=False, shuffle=(train_sampler is None),
+                                  num_workers=self.args.num_workers, drop_last=True, shuffle=(train_sampler is None),
                                   sampler = train_sampler)
 
         niter = 0
@@ -97,7 +97,7 @@ class Trainer:
             
             niter = self.train_single(train_loader, niter, epoch_counter, simfilter)
 
-            if self.args.progressive:
+            if self.args.progressive and epoch_counter != self.args.max_epochs - 1:
                 train_dataset.increase_stage(epoch_counter + 1)
             
             # save checkpoints
@@ -168,6 +168,7 @@ class Trainer:
         return niter
     
     def update(self, batch_view_1, batch_view_2, simfilter, epoch):
+
         if self.args.sim_pretrained:
             batch_view_1, batch_view_2 = simfilter.filter_by_similarity_ratio(batch_view_1, batch_view_2, epoch)
             with torch.no_grad():
@@ -177,10 +178,13 @@ class Trainer:
             with torch.no_grad():
                 targets_to_view_2 = self.target_network(batch_view_1)
                 targets_to_view_1 = self.target_network(batch_view_2)
-            torch.cuda.synchronize()
             batch_view_1, batch_view_2, targets_to_view_2, targets_to_view_1 = simfilter.filter_by_similarity_ratio( \
                                                                                     batch_view_1, batch_view_2, epoch, \
                                                                                     targets_to_view_2, targets_to_view_1)
+        
+        # print(batch_view_1.shape, batch_view_2.shape, targets_to_view_2.shape, targets_to_view_1.shape)
+        # assert batch_view_1.shape == batch_view_2.shape 
+        # assert targets_to_view_1.shape == targets_to_view_2.shape
         
         if self.args.moco:
             predictions_from_view_1 = self.online_network(batch_view_1)
@@ -189,6 +193,7 @@ class Trainer:
         else:
             predictions_from_view_1 = self.predictor(self.online_network(batch_view_1))
             predictions_from_view_2 = self.predictor(self.online_network(batch_view_2))
+            #Symmetric Loss
             loss = self.regression_loss(predictions_from_view_1, targets_to_view_1)
             loss += self.regression_loss(predictions_from_view_2, targets_to_view_2)
             loss = loss.mean()
@@ -270,7 +275,6 @@ class AverageMeter(object):
     def __str__(self):
         fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
         return fmtstr.format(**self.__dict__)
-
 
 class ProgressMeter(object):
     def __init__(self, num_batches, meters, prefix=""):

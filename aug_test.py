@@ -1,13 +1,11 @@
-from re import L
 import torch
 import torchvision
 from argparse import ArgumentParser
 import torchvision.transforms as transforms
-from data.loader import TwoCropsTransform, GaussianBlur, Solarize
+from data.loader import TwoCropsTransform
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import Dataset
-from scipy import interpolate
 from similarity import SimFilter
 from models.mlp_head import MLPHead
 from models.resnet_base_network import ResNet18
@@ -115,7 +113,6 @@ def similarity_test():
             else:
                 batch_view_1, batch_view_2 = simfilter.filter_by_similarity_ratio(batch_view_1, batch_view_2, epoch)
             print(batch_view_1.shape)
-            break
         
         if epoch != args.max_epochs - 1:
             prog_train_dataset.increase_ratio(epoch + 1)
@@ -130,7 +127,6 @@ def adjust_augment_ratio(batch_view_1, batch_view_2):
         normalize = transforms.Normalize(mean=mean, std=std)
 
         augmentation1 = transforms.Compose([
-            np.ndarray,
             transforms.RandomResizedCrop(96, scale=(0.08, 1.)),
             #transforms.RandomApply([
             #    transforms.ColorJitter(0.4 * s, 0.4 * s, 0.2 * s, 0.1 * s) 
@@ -146,12 +142,11 @@ def adjust_augment_ratio(batch_view_1, batch_view_2):
             # transforms.RandomGrayscale(p=0.2 * s),
             # transforms.RandomApply([GaussianBlur([.1, 2.])], p=1.0 * s),
             # transforms.RandomHorizontalFlip(),
-            transforms.ConvertImageDtype(torch.float),
+            transforms.ToTensor(),
             #normalize
         ])
 
         augmentation2 = transforms.Compose([
-            np.ndarray,
             transforms.RandomResizedCrop(96, scale=(0.08, 1.)),
             #transforms.RandomApply([
             #    transforms.ColorJitter(0.4 * s, 0.4 * s, 0.2 * s, 0.1 * s)
@@ -162,7 +157,7 @@ def adjust_augment_ratio(batch_view_1, batch_view_2):
             # transforms.RandomApply([GaussianBlur([.1, 2.])], p=0.1),
             # transforms.RandomApply([Solarize()], p=0.2),
             #transforms.RandomHorizontalFlip(p=0.5*s),
-            transforms.ConvertImageDtype(torch.float),
+            transforms.ToTensor(),
             #normalize
         ])
         return augmentation1(batch_view_1), augmentation2(batch_view_2)
@@ -193,5 +188,18 @@ def sim_interpolation_test():
         end = reduce - begin
 
     processed_batch = processed_batch[begin : -end]
+
+def scale_test():
+    linear = []
+    scale = []
+    for i in range(10):
+        s = args.init_prob + (1 - args.init_prob) / args.max_epochs * i
+        scale_lower = max(1 - s, 0.08)
+        linear.append(s)
+        scale.append(scale_lower)
+    print(linear)
+    print(scale)
+
 if __name__ == '__main__':
-    similarity_test()
+    #similarity_test()
+    scale_test()
