@@ -110,8 +110,8 @@ class Trainer:
             niter = self.train_single(train_loader, niter, epoch_counter, simfilter)
 
             if self.args.progressive and epoch_counter != self.args.max_epochs - 1:
-                #train_dataset.increase_stage(epoch_counter + 1, self.writer)
-                self.increase_ratio(train_dataset, epoch_counter, self.writer)
+                train_dataset.increase_stage(epoch_counter + 1, self.writer)
+                #self.increase_ratio(train_dataset, epoch_counter, self.writer)
             
             # save checkpoints
             if self.args.gpu == 0:

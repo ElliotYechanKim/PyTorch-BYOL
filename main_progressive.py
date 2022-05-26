@@ -185,7 +185,7 @@ def main_ddp(rank, world_size):
         train_dataset =  datasets.STL10(args.datadir, split='train+unlabeled')
         args.orig_img_size = 96
 
-    #train_dataset = ProgressiveDataset(train_dataset, args)
+    train_dataset = ProgressiveDataset(train_dataset, args)
     
     #Lineary Scalining the learning rate
     args.lr = args.lr * args.batch_size / 256
@@ -211,9 +211,6 @@ def main_ddp(rank, world_size):
                         optimizer=optimizer,
                         predictor=predictor,
                         args = args)
-
-    trainer.increase_ratio(train_dataset, 0)
-
     print('trainer initialization finished')
     
     trainer.train(train_dataset)
