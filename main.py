@@ -145,8 +145,7 @@ def main_ddp(rank, world_size):
     online_network = ResNet18(args.name)
 
     # predictor network
-    predictor = MLPHead(in_channels=online_network.projection.net[-1].out_features,
-                        mlp_hidden_size = args.hidden_dim, projection_size = args.proj_size)
+    predictor = MLPHead(in_channels=online_network.projection.net[-1].out_features, name = args.name)
 
     # target encoder
     target_network = ResNet18(args.name)
@@ -156,7 +155,7 @@ def main_ddp(rank, world_size):
 
     # follow BYOL's augmentation recipe: https://arxiv.org/abs/2006.07733
     augmentation1 = [
-        transforms.RandomResizedCrop(224, scale=(0.08, 1.)),
+        transforms.RandomResizedCrop(96, scale=(0.08, 1.)),
         transforms.RandomApply([
             transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)  # not strengthened
         ], p=0.8),
@@ -168,7 +167,7 @@ def main_ddp(rank, world_size):
     ]
 
     augmentation2 = [
-        transforms.RandomResizedCrop(224, scale=(0.08, 1.)),
+        transforms.RandomResizedCrop(96, scale=(0.08, 1.)),
         transforms.RandomApply([
             transforms.ColorJitter(0.4, 0.4, 0.2, 0.1)  # not strengthened
         ], p=0.8),
@@ -185,6 +184,9 @@ def main_ddp(rank, world_size):
                                     transform=TwoCropsTransform(transforms.Compose(augmentation1), transforms.Compose(augmentation2)))
     elif args.dataset == 'imagenet1000':
         train_dataset = datasets.ImageNet(args.datadir, split='train', 
+                                    transform=TwoCropsTransform(transforms.Compose(augmentation1), transforms.Compose(augmentation2)))
+    elif args.dataset == 'stl10':
+        train_dataset = datasets.STL10(args.datadir, split='train+unlabeled', 
                                     transform=TwoCropsTransform(transforms.Compose(augmentation1), transforms.Compose(augmentation2)))
     
     online_network = torch.nn.SyncBatchNorm.convert_sync_batchnorm(online_network)
@@ -273,7 +275,7 @@ def main_single():
         train_dataset =  ImageNet100(args.datadir, split='train', 
                                     transform=TwoCropsTransform(transforms.Compose(augmentation1), transforms.Compose(augmentation2)))
     elif args.dataset == 'imagenet1000':
-        train_dataset =  ImageNet1000(args.datadir, split='train', 
+        train_dataset =  datasets.ImageNet(args.datadir, split='train', 
                                 transform=TwoCropsTransform(transforms.Compose(augmentation1), transforms.Compose(augmentation2)))
 
     online_network = online_network.to_sequential().to(args.gpu)

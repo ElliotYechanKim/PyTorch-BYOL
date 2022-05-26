@@ -430,7 +430,7 @@ def main():
     tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
     inputs = tokenizer("Hello, my dog is cute", return_tensors="pt")
     print(inputs)
-    sequential_layers = bert_to_sequential(teacher_model)
+    sequential_layers = bert_to_sequential(teacher_model, inputs)
     
 if __name__ == '__main__':
     main()

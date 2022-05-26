@@ -6,6 +6,7 @@ import math
 import torch.nn.functional as F
 import kornia.augmentation as K
 import torchvision.transforms as transforms
+import numpy as np
 
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -13,6 +14,8 @@ from kornia.augmentation.container import AugmentationSequential
 from utils import _create_model_training_folder
 from tqdm import tqdm
 from similarity import SimFilter
+from data.loader import TwoCropsTransform, GaussianBlur, Solarize
+
 class Trainer:
     def __init__(self, online_network, target_network, predictor, optimizer, args):
         self.online_network = online_network
@@ -73,6 +76,13 @@ class Trainer:
             self.args.sigma3 = math.ceil(self.args.batch_size * 0.03)
             self.args.orig_batch_size = self.args.batch_size
             self.args.batch_size = int(self.args.batch_size / (1 - self.args.filter_ratio)) + 2 * self.args.sigma3
+            
+            orig_updates = len(train_dataset) / self.args.orig_batch_size
+            updates = len(train_dataset) // self.args.batch_size
+            added_epochs = (orig_updates - updates) * self.args.max_epochs / updates
+            self.args.extra_iter = math.ceil(added_epochs) - added_epochs
+            self.args.max_epochs += math.ceil(added_epochs)
+            
             simfilter = SimFilter(self.args)
         else:
             simfilter = None
@@ -100,7 +110,8 @@ class Trainer:
             niter = self.train_single(train_loader, niter, epoch_counter, simfilter)
 
             if self.args.progressive and epoch_counter != self.args.max_epochs - 1:
-                train_dataset.increase_stage(epoch_counter + 1, self.writer)
+                #train_dataset.increase_stage(epoch_counter + 1, self.writer)
+                self.increase_ratio(train_dataset, epoch_counter, self.writer)
             
             # save checkpoints
             if self.args.gpu == 0:
@@ -127,6 +138,9 @@ class Trainer:
             # measure data loading time
             data_time.update(time.time() - end)
             
+            if epoch == self.args.max_epochs - 1 and i >= self.args.extra_iter * len(train_loader):
+                break
+    
             batch_view_1 = batch_view_1.to(self.args.gpu)
             batch_view_2 = batch_view_2.to(self.args.gpu)
 
@@ -229,6 +243,49 @@ class Trainer:
             'optimizer_state_dict': self.optimizer.state_dict(),
         }, PATH)
 
+    def increase_ratio(self, train_dataset, epoch, writer = None):
+        if self.args.interpolate == 'linear':
+            s = self.args.init_prob + (self.args.max_prob - self.args.init_prob) / self.args.max_epochs * epoch
+        elif self.args.interpolate == 'log':
+            s = np.exp(np.log(self.args.init_prob) + (np.log(self.args.max_prob - self.args.init_prob) - np.log(self.args.init_prob)) / \
+                                                    np.log(self.args.max_epochs) * np.log(epoch)) + self.args.init_prob
+        scale_lower = max(1 - s, 0.08)
+        mean = torch.tensor([0.43, 0.42, 0.39])
+        std  = torch.tensor([0.27, 0.26, 0.27])
+        normalize = transforms.Normalize(mean=mean, std=std)
+
+        augmentation1 = [
+            transforms.RandomResizedCrop(self.args.orig_img_size * s, scale=(scale_lower, 1.)),
+            transforms.RandomApply([
+                transforms.ColorJitter(0.4 * s, 0.4 * s, 0.2 * s, 0.1 * s)  # not strengthened
+            ], p=0.8 * s),
+            transforms.RandomGrayscale(p = 0.2 * s),
+            transforms.RandomApply([GaussianBlur([.1, 2.])], p = 1.0 * s),
+            transforms.RandomHorizontalFlip(p = 0.5 * s),
+            transforms.ToTensor(),
+            normalize
+        ]
+
+        augmentation2 = [
+            transforms.RandomResizedCrop(self.args.orig_img_size * s, scale=(scale_lower, 1.)),
+            transforms.RandomApply([
+                transforms.ColorJitter(0.4 * s, 0.4 * s, 0.2 * s, 0.1 * s)  # not strengthened
+            ], p=0.8 * s),
+            transforms.RandomGrayscale(p = 0.2 * s),
+            transforms.RandomApply([GaussianBlur([.1, 2.])], p = 0.1 * s),
+            transforms.RandomApply([Solarize()], p = 0.2 * s),
+            transforms.RandomHorizontalFlip(p = 0.5 * s),
+            transforms.ToTensor(),
+            normalize
+        ]
+        transforms_func = TwoCropsTransform(transforms.Compose(augmentation1), transforms.Compose(augmentation2))
+        train_dataset.transform = transforms_func
+        
+        if writer:
+            writer.add_scalar('s', s, global_step=epoch)
+            writer.add_scalar('image size', self.args.orig_img_size * s, global_step=epoch)
+            writer.add_scalar('scale_lower', scale_lower, global_step=epoch)
+    
     #For interation ratio increases, this will be needed.
     def adjust_augment_ratio(self, batch_view_1, batch_view_2, niter, length, epochs):
         

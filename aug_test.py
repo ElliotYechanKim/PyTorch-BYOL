@@ -25,7 +25,6 @@ parser.add_argument('--progressive', action='store_true')
 parser.add_argument('-b', '--batch-size', type=int, default=128)
 parser.add_argument('--max-epochs', type=int, default=40)
 parser.add_argument('--init_prob', type=float, default=0.2)
-parser.add_argument('--interpolate', type=str, default='linear')
 parser.add_argument('--name', type=str, default='resnet18')
 parser.add_argument('--filter-ratio', type=float, default=0.1)
 parser.add_argument('--sim-pretrained', action='store_true', help = 'Using pre-trained model to masuer the similarity')
@@ -35,7 +34,6 @@ class ProgressiveDataset(Dataset):
     def __init__(self, dataset):
         super(ProgressiveDataset, self).__init__()
         self.dataset = dataset
-        self.interpolate_fucntion = self.get_inter_func()
         self.increase_ratio(0)
         print('progressivedataset initialized')
 
@@ -45,14 +43,8 @@ class ProgressiveDataset(Dataset):
     def __getitem__(self, index):
         return self.dataset.__getitem__(index)
 
-    def get_inter_func(self):
-        x = np.linspace(0, args.max_epochs, num = 4)
-        y = np.linspace(args.init_prob, 1.0, num = 4)
-        print(args.interpolate)
-        return interpolate.interp1d(x, y, kind=args.interpolate)
 
     def increase_ratio(self, epoch):
-        s = self.interpolate_fucntion(epoch)
         # if writer:
         #     writer.add_scalar('ratio', s, global_step=epoch)
 
@@ -93,14 +85,21 @@ def similarity_test():
 
     online_network = ResNet18(args.name)
     predictor = MLPHead(in_channels=online_network.projection.net[-1].out_features, name=args.name)
-    simfilter = SimFilter(args, online_network)
+    train_dataset =  torchvision.datasets.STL10('/home/ykim/data/stl10', split='train+unlabeled')    
     
     if args.progressive:
         args.sigma3 = math.ceil(args.batch_size * 0.03)
         args.orig_batch_size = args.batch_size
         args.batch_size = int(args.batch_size / (1 - args.filter_ratio)) + 2 * args.sigma3
 
-    train_dataset =  torchvision.datasets.STL10('/home/ykim/data/stl10', split='train+unlabeled')
+        orig_updates = len(train_dataset) / args.orig_batch_size
+        print(orig_updates)
+        updates = len(train_dataset) / args.batch_size
+        print(updates)
+        added_epochs = (orig_updates - updates) * args.max_epochs / updates
+        print(added_epochs)
+        simfilter = SimFilter(args, online_network)
+
     prog_train_dataset = ProgressiveDataset(train_dataset)
     train_loader = DataLoader(prog_train_dataset, batch_size = args.batch_size, num_workers = 8, 
                                             drop_last = False, shuffle = True)
@@ -201,5 +200,5 @@ def scale_test():
     print(scale)
 
 if __name__ == '__main__':
-    #similarity_test()
-    scale_test()
+    similarity_test()
+    #scale_test()
