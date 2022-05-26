@@ -138,7 +138,7 @@ class Trainer:
             # measure data loading time
             data_time.update(time.time() - end)
             
-            if epoch == self.args.max_epochs - 1 and i >= self.args.extra_iter * len(train_loader):
+            if self.args.progressive and epoch == self.args.max_epochs - 1 and i >= self.args.extra_iter * len(train_loader):
                 break
     
             batch_view_1 = batch_view_1.to(self.args.gpu)
