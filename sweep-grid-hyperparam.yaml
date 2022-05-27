@@ -1,0 +1,26 @@
+command:
+- --fix-random
+- --progressive
+- --single
+program: main_progressive.py
+method: grid
+metric:
+  goal: minimize
+  name: loss
+parameters:
+  datadir:
+    value: '/home/ykim/data/stl10'
+  dataset:
+    value: 'stl10'
+  max-epochs:
+    value: 40
+  warmup-epochs:
+    value: 0
+  init-prob:
+    values: [0.5, 0.75]
+  max-prob: 
+    values: [1.0, 1.25]
+  filter-ratio: 
+    values: [0.1, 0.25, 0.5]
+  interpolate:
+    values: ['linear', 'log']

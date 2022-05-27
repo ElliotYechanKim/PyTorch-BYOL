@@ -166,6 +166,8 @@ class Trainer:
                     self.writer.add_scalar('loss', (loss.item() * self.args.accum), global_step=niter)
                 
                 losses.update(loss.item(), batch_view_1.size(0))
+                
+                self.args.wandb.log({'loss' : loss.item()})
 
                 self.optimizer.step()
                 self.optimizer.zero_grad()

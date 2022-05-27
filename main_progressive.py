@@ -6,6 +6,7 @@ import numpy as np
 import random
 import os
 import builtins
+import wandb
 
 from torchvision import datasets
 from data.imagenet100 import ImageNet100
@@ -19,15 +20,15 @@ from data.dataset import ProgressiveDataset
 sys.path.append('../')
 
 parser = ArgumentParser()
-parser.add_argument('--datadir', type=str, default='/home/ykim/data/imagenet/')
-parser.add_argument('--dataset', type=str, default='imagenet100')
+parser.add_argument('--datadir', type=str, default='/home/ykim/data/stl10')
+parser.add_argument('--dataset', type=str, default='stl10')
 parser.add_argument('--vessl', action='store_true')
 
 #Network args
 parser.add_argument('--name', type=str, default="resnet18")
 parser.add_argument('--hidden-dim', type=int, default=512)
 parser.add_argument('--proj-size', type=int, default=128)
-parser.add_argument('--batch-size', type=int, default=1024)
+parser.add_argument('--batch-size', type=int, default=512)
 
 #Optimizer args
 parser.add_argument('--optimizer', type=str, default='LARS')
@@ -44,13 +45,13 @@ parser.add_argument('--moco-t', default=0.07, type=float,
                     help='softmax temperature (default: 0.07)')
 
 #Trainer args
-parser.add_argument('--max-epochs', type=int, default=200)
-parser.add_argument('--warmup-epochs', type=int, default=10)
+parser.add_argument('--max-epochs', type=int, default=40)
+parser.add_argument('--warmup-epochs', type=int, default=0)
 parser.add_argument('--num-workers', type=int, default=8)
 parser.add_argument('--print-freq', type=int, default=10, help="print frequency")
 
 #DDP args
-parser.add_argument('--single', action='store_true', default=False)
+parser.add_argument('--single', action='store_true')
 parser.add_argument('--num-gpus', type=int, default=torch.cuda.device_count())
 
 #Progressive args
@@ -76,7 +77,9 @@ def main_single():
     args.gpu = 0
     device = f'cuda:{args.gpu}'
     print(f"Training with: {device}")
-
+    
+    args.wandb = wandb.init(config=args, project="progressives")
+    
     # online network
     online_network = ResNet18(args.name)
     online_network = online_network.to(args.gpu)
@@ -123,6 +126,8 @@ def main_single():
     elif args.optimizer == 'AdamW':
         optimizer = torch.optim.AdamW(optimizer_params, lr=args.lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=args.wd)
     
+    args.wandb.watch([online_network, target_network, predictor])
+
     trainer = Trainer(online_network=online_network,
                         target_network=target_network,
                         optimizer=optimizer,
