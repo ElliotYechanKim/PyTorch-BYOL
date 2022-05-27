@@ -1,6 +1,6 @@
 from models.resnet_base_network import ResNet18
 import torch
-import math
+import random
 
 class SimFilter:
     def __init__(self, args, encoder=None):
@@ -87,7 +87,11 @@ class SimFilter:
         
         if bool_rep:
             sorted_rep = sorted(zip(rep_1, rep_2, similarity), key=lambda x: x[2], reverse=True)
-            processed_rep = sorted_rep[self.args.sigma3 + begin: -(self.args.sigma3 + end)]
+            if self.args.filter_type == 'window':
+                processed_rep = sorted_rep[self.args.sigma3 + begin: -(self.args.sigma3 + end)]
+            elif self.args.filter_type == 'sample':
+                processed_rep = random(sorted_rep[self.args.sigma3 : -(self.args.sigma3 + end)], self.args.orig_batch_size)
+
             rep_v1_list = []
             rep_v2_list = []
             for v1, v2, _ in processed_rep:

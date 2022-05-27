@@ -175,18 +175,23 @@ def interpolation_test():
                                                 np.log(args.max_epochs) * np.log(i)) + args.init_prob
         print(s)
 
-def sim_interpolation_test():
+def filter_length_tests():
 
     filter_ratio = 0.1
-    length = 120
-    batch_size = int(length * filter_ratio)
-        
-    reduce = length - batch_size
+    orig_batch_size = 512
+    reduce = int(orig_batch_size * filter_ratio)
+    increased_batch = orig_batch_size + reduce
+    
+    begins = []
+    ends = []
     for i in range(10):
-        begin = int((len(processed_batch) - batch_size) * i / 10)
+        begin = int(reduce * i / 10)
         end = reduce - begin
+        begins.append(begin)
+        ends.append(end)
 
-    processed_batch = processed_batch[begin : -end]
+    print(begins)
+    print(ends)
 
 def scale_test():
     linear = []
@@ -200,5 +205,6 @@ def scale_test():
     print(scale)
 
 if __name__ == '__main__':
-    similarity_test()
+    #similarity_test()
     #scale_test()
+    filter_length_tests()

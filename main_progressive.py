@@ -62,7 +62,7 @@ parser.add_argument('--max-prob',  type=float, default = 1.25)
 parser.add_argument('--filter-ratio',  type=float, default = 0.1)
 parser.add_argument('--interpolate', type=str, default = 'linear')
 parser.add_argument('--sim-pretrained', action='store_true', help = 'Using pre-trained model to masuer the similarity')
-
+parser.add_argument('--filter-type', type=str, default = 'window')
 args = parser.parse_args()
 
 if args.fix_random:
