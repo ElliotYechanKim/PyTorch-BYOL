@@ -1,7 +1,3 @@
-command:
-- --fix-random
-- --progressive
-- --single
 program: main_progressive.py
 method: grid
 metric:
@@ -24,3 +20,11 @@ parameters:
     values: [0.1, 0.25, 0.5]
   interpolate:
     values: ['linear', 'log']
+  filter-type:
+    values: ['sample', 'window']
+command:
+  - python3 
+  - ${program}
+  - --fix-random
+  - --progressive
+  - --single
