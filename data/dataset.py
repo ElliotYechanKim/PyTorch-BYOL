@@ -17,12 +17,14 @@ class ProgressiveDataset(Dataset):
         return self.dataset.__getitem__(index)
 
     def increase_stage(self, epoch, writer=None):
-
-        if self.args.interpolate == 'linear':
-            s = self.args.init_prob + (self.args.max_prob - self.args.init_prob) / self.args.max_epochs * epoch
-        elif self.args.interpolate == 'log':
-            s = np.exp(np.log(self.args.init_prob) + (np.log(self.args.max_prob - self.args.init_prob) - np.log(self.args.init_prob)) / \
-                                                    np.log(self.args.max_epochs) * np.log(epoch)) + self.args.init_prob
+        if epoch == 0:
+            s = self.args.init_prob
+        else:
+            if self.args.interpolate == 'linear':
+                s = self.args.init_prob + (self.args.max_prob - self.args.init_prob) / self.args.max_epochs * epoch
+            elif self.args.interpolate == 'log':
+                s = np.exp(np.log(self.args.init_prob) + (np.log(self.args.max_prob - self.args.init_prob) - np.log(self.args.init_prob)) / \
+                                                        np.log(self.args.max_epochs) * np.log(epoch)) + self.args.init_prob
         scale_lower = max(1 - s, 0.08)
         mean = torch.tensor([0.43, 0.42, 0.39])
         std  = torch.tensor([0.27, 0.26, 0.27])

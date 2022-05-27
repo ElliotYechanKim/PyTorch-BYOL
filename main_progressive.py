@@ -78,7 +78,7 @@ def main_single():
     device = f'cuda:{args.gpu}'
     print(f"Training with: {device}")
     
-    args.wandb = wandb.init(config=args, project="progressives")
+    args.wandb = wandb.init(config=args, project="progressive")
     
     # online network
     online_network = ResNet18(args.name)
