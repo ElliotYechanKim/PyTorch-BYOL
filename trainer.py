@@ -73,16 +73,6 @@ class Trainer:
             train_sampler = None
         
         if self.args.progressive:
-            self.args.sigma3 = math.ceil(self.args.batch_size * 0.03)
-            self.args.orig_batch_size = self.args.batch_size
-            self.args.batch_size = int(self.args.batch_size / (1 - self.args.filter_ratio)) + 2 * self.args.sigma3
-            
-            orig_updates = len(train_dataset) / self.args.orig_batch_size
-            updates = len(train_dataset) // self.args.batch_size
-            added_epochs = (orig_updates - updates) * self.args.max_epochs / updates
-            self.args.extra_iter = math.ceil(added_epochs) - added_epochs
-            self.args.max_epochs += math.ceil(added_epochs)
-            
             simfilter = SimFilter(self.args)
         else:
             simfilter = None
@@ -112,12 +102,9 @@ class Trainer:
             if self.args.progressive and epoch_counter != self.args.max_epochs - 1:
                 train_dataset.increase_stage(epoch_counter + 1, self.writer)
                 #self.increase_ratio(train_dataset, epoch_counter, self.writer)
-            
-            # save checkpoints
-            if self.args.gpu == 0:
-                self.save_model(os.path.join(model_checkpoints_folder, f'model{epoch_counter}.pth'))
         
         if self.args.gpu == 0:
+            self.save_model(os.path.join(model_checkpoints_folder, f'model{epoch_counter}.pth'))
             self.writer.close()
 
     def train_single(self, train_loader, niter, epoch, simfiler):

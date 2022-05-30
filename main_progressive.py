@@ -7,6 +7,7 @@ import random
 import os
 import builtins
 import wandb
+import math
 
 from torchvision import datasets
 from data.imagenet100 import ImageNet100
@@ -107,8 +108,6 @@ def main_single():
         train_dataset =  datasets.STL10(args.datadir, split='train+unlabeled')
         args.orig_img_size = 96
 
-    train_dataset = ProgressiveDataset(train_dataset, args)
-
     # When using a single GPU per process and per
     # DistributedDataParallel, we need to divide the batch size
     # ourselves based on the total number of GPUs we have
@@ -127,6 +126,19 @@ def main_single():
         optimizer = torch.optim.AdamW(optimizer_params, lr=args.lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=args.wd)
     
     args.wandb.watch([online_network, target_network, predictor])
+
+    if args.progressive:
+        args.sigma3 = math.ceil(args.batch_size * 0.03)
+        args.orig_batch_size = args.batch_size
+        args.batch_size = int(args.batch_size / (1 - args.filter_ratio)) + 2 * args.sigma3
+        
+        orig_updates = len(train_dataset) / args.orig_batch_size
+        updates = len(train_dataset) // args.batch_size
+        added_epochs = (orig_updates - updates) * args.max_epochs / updates
+        args.extra_iter = math.ceil(added_epochs) - added_epochs
+        args.max_epochs += math.ceil(added_epochs)
+
+    train_dataset = ProgressiveDataset(train_dataset, args)
 
     trainer = Trainer(online_network=online_network,
                         target_network=target_network,
@@ -189,8 +201,6 @@ def main_ddp(rank, world_size):
     elif args.dataset == 'stl10':
         train_dataset =  datasets.STL10(args.datadir, split='train+unlabeled')
         args.orig_img_size = 96
-
-    train_dataset = ProgressiveDataset(train_dataset, args)
     
     #Lineary Scalining the learning rate
     args.lr = args.lr * args.batch_size / 256
@@ -211,6 +221,19 @@ def main_ddp(rank, world_size):
     elif args.optimizer == 'AdamW':
         optimizer = torch.optim.AdamW(optimizer_params, lr=args.lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=args.wd)
     
+    if args.progressive:
+        args.sigma3 = math.ceil(args.batch_size * 0.03)
+        args.orig_batch_size = args.batch_size
+        args.batch_size = int(args.batch_size / (1 - args.filter_ratio)) + 2 * args.sigma3
+        
+        orig_updates = len(train_dataset) / args.orig_batch_size
+        updates = len(train_dataset) // args.batch_size
+        added_epochs = (orig_updates - updates) * args.max_epochs / updates
+        args.extra_iter = math.ceil(added_epochs) - added_epochs
+        args.max_epochs += math.ceil(added_epochs)
+
+    train_dataset = ProgressiveDataset(train_dataset, args)
+
     trainer = Trainer(online_network=online_network,
                         target_network=target_network,
                         optimizer=optimizer,
