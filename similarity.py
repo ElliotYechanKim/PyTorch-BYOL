@@ -90,7 +90,7 @@ class SimFilter:
             if self.args.filter_type == 'window':
                 processed_rep = sorted_rep[self.args.sigma3 + begin: -(self.args.sigma3 + end)]
             elif self.args.filter_type == 'sample':
-                processed_rep = random(sorted_rep[self.args.sigma3 : -(self.args.sigma3 + end)], self.args.orig_batch_size)
+                processed_rep = random.sample(sorted_rep[self.args.sigma3 : -(self.args.sigma3 + end)], self.args.orig_batch_size)
 
             rep_v1_list = []
             rep_v2_list = []

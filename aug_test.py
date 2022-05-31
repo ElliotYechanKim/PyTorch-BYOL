@@ -23,8 +23,9 @@ random.seed(random_seed)
 parser = ArgumentParser()
 parser.add_argument('--progressive', action='store_true')
 parser.add_argument('-b', '--batch-size', type=int, default=128)
-parser.add_argument('--max-epochs', type=int, default=40)
-parser.add_argument('--init_prob', type=float, default=0.2)
+parser.add_argument('--max-epochs', type=int, default=10)
+parser.add_argument('--init-prob', type=float, default=0.2)
+parser.add_argument('--max-prob', type=float, default=1.0)
 parser.add_argument('--name', type=str, default='resnet18')
 parser.add_argument('--filter-ratio', type=float, default=0.1)
 parser.add_argument('--sim-pretrained', action='store_true', help = 'Using pre-trained model to masuer the similarity')
@@ -86,7 +87,7 @@ def similarity_test():
     online_network = ResNet18(args.name)
     predictor = MLPHead(in_channels=online_network.projection.net[-1].out_features, name=args.name)
     train_dataset =  torchvision.datasets.STL10('/home/ykim/data/stl10', split='train+unlabeled')    
-    
+    print(len(train_dataset))
     if args.progressive:
         args.sigma3 = math.ceil(args.batch_size * 0.03)
         args.orig_batch_size = args.batch_size
@@ -165,14 +166,14 @@ def interpolation_test():
     linear = []
     print('Linear interpolation TEST from 0 to 10')
     for i in range(10):
-        s = args.init_prob + (1 - args.init_prob) / args.max_epochs * i
+        s = args.init_prob + (args.max_prob - args.init_prob) / args.max_epochs * i
         print(s)
     
     log_linear = []
     print('Log Linear interpolation TEST from 0 to 10')
     for i in range(10):
-        s = np.exp(np.log(args.init_prob) + (np.log(1 - args.init_prob) - np.log(args.init_prob)) / \
-                                                np.log(args.max_epochs) * np.log(i)) + args.init_prob
+        s = np.exp(np.log(args.init_prob) + (np.log(args.max_prob) - np.log(args.init_prob)) / \
+                                                        np.log(args.max_epochs + 1) * np.log(i + 1))
         print(s)
 
 def filter_length_tests():
@@ -205,6 +206,7 @@ def scale_test():
     print(scale)
 
 if __name__ == '__main__':
-    #similarity_test()
+    #interpolation_test()
+    similarity_test()
     #scale_test()
-    filter_length_tests()
+    #filter_length_tests()

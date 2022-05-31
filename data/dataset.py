@@ -8,7 +8,6 @@ class ProgressiveDataset(Dataset):
     def __init__(self, dataset, args):
         self.dataset = dataset
         self.args = args
-        self.increase_stage(0) # initial ratio
 
     def __len__(self):
         return self.dataset.__len__()
@@ -16,13 +15,17 @@ class ProgressiveDataset(Dataset):
     def __getitem__(self, index):
         return self.dataset.__getitem__(index)
 
-    def increase_stage(self, epoch, writer=None):
+    def increase_stage(self, epoch, writer=None, wandb=None):
 
         if self.args.interpolate == 'linear':
             s = self.args.init_prob + (self.args.max_prob - self.args.init_prob) / self.args.max_epochs * epoch
+            
         elif self.args.interpolate == 'log':
-            s = np.exp(np.log(self.args.init_prob) + (np.log(self.args.max_prob - self.args.init_prob) - np.log(self.args.init_prob)) / \
-                                                    np.log(self.args.max_epochs) * np.log(epoch)) + self.args.init_prob
+            # s = np.exp(np.log(self.args.init_prob) + (np.log(self.args.max_prob - self.args.init_prob) - np.log(self.args.init_prob)) / \
+            #                                                         np.log(self.args.max_epochs) * np.log(epoch)) + self.args.init_prob
+            s = np.exp(np.log(self.args.init_prob) + (np.log(self.args.max_prob) - np.log(self.args.init_prob)) / \
+                                                                    np.log(self.args.max_epochs) * np.log(epoch + 1))
+        #scale_lower = 1 + (0.08 - 1) / self.args.max_epochs * epoch
         scale_lower = max(1 - s, 0.08)
         mean = torch.tensor([0.43, 0.42, 0.39])
         std  = torch.tensor([0.27, 0.26, 0.27])
@@ -59,3 +62,8 @@ class ProgressiveDataset(Dataset):
             writer.add_scalar('s', s, global_step=epoch)
             writer.add_scalar('image size', self.args.orig_img_size * s, global_step=epoch)
             writer.add_scalar('scale_lower', scale_lower, global_step=epoch)
+        
+        if wandb:
+            wandb.log({'s', s})
+            wandb.log({'image size', self.args.orig_img_size * s})
+            wandb.log({'scale_lower', scale_lower})

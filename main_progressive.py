@@ -17,6 +17,7 @@ from trainer import Trainer
 from argparse import ArgumentParser
 from lars import LARS
 from data.dataset import ProgressiveDataset
+from torch.utils.tensorboard import SummaryWriter
 
 sys.path.append('../')
 
@@ -78,9 +79,9 @@ def main_single():
     args.gpu = 0
     device = f'cuda:{args.gpu}'
     print(f"Training with: {device}")
-    
-    args.wandb = wandb.init(config=args, project="progressives")
-    
+
+    args.wandb = wandb.init(project="progressive")
+
     # online network
     online_network = ResNet18(args.name)
     online_network = online_network.to(args.gpu)
@@ -124,27 +125,32 @@ def main_single():
         optimizer = LARS(optimizer_params, lr=args.lr, weight_decay=args.wd, momentum=args.momentum, trust_coefficient=args.t)
     elif args.optimizer == 'AdamW':
         optimizer = torch.optim.AdamW(optimizer_params, lr=args.lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=args.wd)
-    
-    args.wandb.watch([online_network, target_network, predictor])
 
     if args.progressive:
         args.sigma3 = math.ceil(args.batch_size * 0.03)
         args.orig_batch_size = args.batch_size
-        args.batch_size = int(args.batch_size / (1 - args.filter_ratio)) + 2 * args.sigma3
+        args.batch_size = int(args.batch_size / (1 - args.wandb.config.filter_ratio)) + 2 * args.sigma3
         
-        orig_updates = len(train_dataset) / args.orig_batch_size
-        updates = len(train_dataset) // args.batch_size
-        added_epochs = (orig_updates - updates) * args.max_epochs / updates
-        args.extra_iter = math.ceil(added_epochs) - added_epochs
-        args.max_epochs += math.ceil(added_epochs)
+        #DROP LAST
+        orig_updates = (len(train_dataset) // args.orig_batch_size) * args.max_epochs
+        args.total_iter = orig_updates
+        our_updates = (len(train_dataset) // args.batch_size) * args.max_epochs
+        added_epochs = (orig_updates - our_updates) / (len(train_dataset) // args.batch_size)
+        args.max_epochs += int(math.ceil(added_epochs))
 
-    train_dataset = ProgressiveDataset(train_dataset, args)
-
+    args.wandb.config.update(args)
+    args.wandb.watch([online_network, target_network, predictor])
+    print(args.wandb.config)
+    train_dataset = ProgressiveDataset(train_dataset, args.wandb.config)
+    writer = SummaryWriter() if args.gpu == 0 else None
+    train_dataset.increase_stage(0, writer)
     trainer = Trainer(online_network=online_network,
                         target_network=target_network,
                         optimizer=optimizer,
                         predictor=predictor,
-                        args = args)
+                        args = args.wandb.config,
+                        wb = args.wandb,
+                        writer = writer)
     
     trainer.train(train_dataset)
 
@@ -231,14 +237,23 @@ def main_ddp(rank, world_size):
         added_epochs = (orig_updates - updates) * args.max_epochs / updates
         args.extra_iter = math.ceil(added_epochs) - added_epochs
         args.max_epochs += math.ceil(added_epochs)
-
-    train_dataset = ProgressiveDataset(train_dataset, args)
+    
+    if args.gpu == 0:
+        args.wandb = wandb.init(config=args, project="progressive")
+        args.wandb.watch([online_network, target_network, predictor])
+        print(args.wandb.config)
+    
+    writer = SummaryWriter() if args.gpu == 0 else None
+    
+    train_dataset = ProgressiveDataset(train_dataset, args.wandb.config)
 
     trainer = Trainer(online_network=online_network,
                         target_network=target_network,
                         optimizer=optimizer,
                         predictor=predictor,
-                        args = args)
+                        args = args,
+                        wb = args.wandb,
+                        writer = writer)
     print('trainer initialization finished')
     
     trainer.train(train_dataset)

@@ -4,23 +4,15 @@ metric:
   goal: minimize
   name: loss
 parameters:
-  datadir:
-    value: '/home/ykim/data/stl10'
-  dataset:
-    value: 'stl10'
-  max-epochs:
-    value: 40
-  warmup-epochs:
-    value: 0
-  init-prob:
+  init_prob:
     values: [0.5, 0.75]
-  max-prob: 
-    values: [1.0, 1.25]
-  filter-ratio: 
+  max_prob: 
+    value: 1.25
+  filter_ratio: 
     values: [0.1, 0.25, 0.5]
   interpolate:
-    values: ['linear', 'log']
-  filter-type:
+    value: 'log'
+  filter_type:
     values: ['sample', 'window']
 command:
   - python3 
