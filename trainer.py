@@ -9,15 +9,13 @@ import torchvision.transforms as transforms
 import numpy as np
 
 from torch.utils.data.dataloader import DataLoader
-from torch.utils.tensorboard import SummaryWriter
 from kornia.augmentation.container import AugmentationSequential
 from utils import _create_model_training_folder
-from tqdm import tqdm
 from similarity import SimFilter
 from data.loader import TwoCropsTransform, GaussianBlur, Solarize
 
 class Trainer:
-    def __init__(self, online_network, target_network, predictor, optimizer, args):
+    def __init__(self, online_network, target_network, predictor, optimizer, args, wb, writer):
         self.online_network = online_network
         self.target_network = target_network
         self.predictor = predictor
@@ -26,11 +24,13 @@ class Trainer:
         if args.vessl:
             import vessl
             vessl.init(tensorboard = True)
-        
-        self.writer = SummaryWriter() if args.gpu == 0 else None
+
         self.initial_m = args.m
         self.args = args
+        if self.args.gpu == 0:
+            self.wandb = wb
         
+        self.writer = writer
         if self.writer:
             _create_model_training_folder(self.writer, files_to_same=["main.py", 'trainer.py'])
 
@@ -73,16 +73,6 @@ class Trainer:
             train_sampler = None
         
         if self.args.progressive:
-            self.args.sigma3 = math.ceil(self.args.batch_size * 0.03)
-            self.args.orig_batch_size = self.args.batch_size
-            self.args.batch_size = int(self.args.batch_size / (1 - self.args.filter_ratio)) + 2 * self.args.sigma3
-            
-            orig_updates = len(train_dataset) / self.args.orig_batch_size
-            updates = len(train_dataset) // self.args.batch_size
-            added_epochs = (orig_updates - updates) * self.args.max_epochs / updates
-            self.args.extra_iter = math.ceil(added_epochs) - added_epochs
-            self.args.max_epochs += math.ceil(added_epochs)
-            
             simfilter = SimFilter(self.args)
         else:
             simfilter = None
@@ -105,19 +95,18 @@ class Trainer:
             m = self.adjust_momentum(epoch_counter)
             if self.args.gpu == 0:
                 self.writer.add_scalar('learning_rate', lr, global_step=epoch_counter)
+                self.wandb.log({'learning_rate' : lr})
                 self.writer.add_scalar('momentum', m, global_step=epoch_counter)
+                self.wandb.log({'momentum' : m})
             
             niter = self.train_single(train_loader, niter, epoch_counter, simfilter)
 
             if self.args.progressive and epoch_counter != self.args.max_epochs - 1:
-                train_dataset.increase_stage(epoch_counter + 1, self.writer)
+                train_dataset.increase_stage(epoch_counter + 1, self.writer, self.wandb)
                 #self.increase_ratio(train_dataset, epoch_counter, self.writer)
-            
-            # save checkpoints
-            if self.args.gpu == 0:
-                self.save_model(os.path.join(model_checkpoints_folder, f'model{epoch_counter}.pth'))
         
         if self.args.gpu == 0:
+            self.save_model(os.path.join(model_checkpoints_folder, f'model{epoch_counter}.pth'))
             self.writer.close()
 
     def train_single(self, train_loader, niter, epoch, simfiler):
@@ -138,7 +127,7 @@ class Trainer:
             # measure data loading time
             data_time.update(time.time() - end)
             
-            if self.args.progressive and epoch == self.args.max_epochs - 1 and i >= self.args.extra_iter * len(train_loader):
+            if self.args.progressive and niter == self.args.total_iter:
                 break
     
             batch_view_1 = batch_view_1.to(self.args.gpu)
@@ -167,7 +156,8 @@ class Trainer:
                 
                 losses.update(loss.item(), batch_view_1.size(0))
                 
-                self.args.wandb.log({'loss' : loss.item()})
+                if self.args.gpu == 0: 
+                    self.wandb.log({'loss' : loss.item()})
 
                 self.optimizer.step()
                 self.optimizer.zero_grad()
@@ -206,6 +196,7 @@ class Trainer:
                 targets_to_view_2 = self.target_network(batch_view_1)
                 targets_to_view_1 = self.target_network(batch_view_2)
         
+        assert batch_view_1.shape[0] == self.args.orig_batch_size
         # print(batch_view_1.shape, batch_view_2.shape, targets_to_view_2.shape, targets_to_view_1.shape)
         # assert batch_view_1.shape == batch_view_2.shape 
         # assert targets_to_view_1.shape == targets_to_view_2.shape
