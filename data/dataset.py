@@ -64,6 +64,7 @@ class ProgressiveDataset(Dataset):
             writer.add_scalar('scale_lower', scale_lower, global_step=epoch)
         
         if wandb:
-            wandb.log({'s', s})
-            wandb.log({'image size', self.args.orig_img_size * s})
-            wandb.log({'scale_lower', scale_lower})
+            wandb.log({'s' : s})
+            img_size = self.args.orig_img_size * s
+            wandb.log({'image size' : img_size})
+            wandb.log({'scale_lower' : scale_lower})

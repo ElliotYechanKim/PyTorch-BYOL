@@ -67,15 +67,9 @@ class Trainer:
 
     def train(self, train_dataset):
         
-        if not self.args.single:
-            train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
-        else:
-            train_sampler = None
-        
-        if self.args.progressive:
-            simfilter = SimFilter(self.args)
-        else:
-            simfilter = None
+        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if not self.args.single else None
+
+        simfilter = SimFilter(self.args) if self.args.progressive else None
         
         train_loader = DataLoader(train_dataset, batch_size=self.args.batch_size,
                                   shuffle=(train_sampler is None), sampler = train_sampler,
@@ -109,7 +103,7 @@ class Trainer:
             self.save_model(os.path.join(model_checkpoints_folder, f'model{epoch_counter}.pth'))
             self.writer.close()
 
-    def train_single(self, train_loader, niter, epoch, simfiler):
+    def train_single(self, train_loader, niter, epoch, simfilter):
         
         batch_time = AverageMeter('Time', ':6.3f')
         data_time = AverageMeter('Data', ':6.3f')
@@ -145,7 +139,7 @@ class Trainer:
                 grid = torchvision.utils.make_grid(batch_view_2[:4].detach(), normalize=True)
                 self.writer.add_image('views_2', grid, global_step=epoch)
         
-            loss = self.update(batch_view_1, batch_view_2, simfiler, epoch)
+            loss = self.update(batch_view_1, batch_view_2, epoch, simfilter)
             loss = loss / self.args.accum
 
             loss.backward()
@@ -176,7 +170,7 @@ class Trainer:
         
         return niter
     
-    def update(self, batch_view_1, batch_view_2, simfilter, epoch):
+    def update(self, batch_view_1, batch_view_2, epoch, simfilter):
         
         if simfilter:
             if self.args.sim_pretrained:
@@ -191,12 +185,12 @@ class Trainer:
                 batch_view_1, batch_view_2, targets_to_view_2, targets_to_view_1 = simfilter.filter_by_similarity_ratio( \
                                                                                         batch_view_1, batch_view_2, epoch, \
                                                                                         targets_to_view_2.detach(), targets_to_view_1.detach())
+            assert batch_view_1.shape[0] == self.args.orig_batch_size
         else:
             with torch.no_grad():
                 targets_to_view_2 = self.target_network(batch_view_1)
                 targets_to_view_1 = self.target_network(batch_view_2)
         
-        assert batch_view_1.shape[0] == self.args.orig_batch_size
         # print(batch_view_1.shape, batch_view_2.shape, targets_to_view_2.shape, targets_to_view_1.shape)
         # assert batch_view_1.shape == batch_view_2.shape 
         # assert targets_to_view_1.shape == targets_to_view_2.shape

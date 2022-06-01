@@ -1,10 +1,11 @@
+import os
+#os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 import torch
 import torch.multiprocessing as mp
 import torch.distributed as dist
 import sys
 import numpy as np
 import random
-import os
 import builtins
 import wandb
 import math
@@ -79,7 +80,6 @@ def main_single():
     args.gpu = 0
     device = f'cuda:{args.gpu}'
     print(f"Training with: {device}")
-
     args.wandb = wandb.init(project="progressive")
 
     # online network
@@ -129,7 +129,7 @@ def main_single():
     if args.progressive:
         args.sigma3 = math.ceil(args.batch_size * 0.03)
         args.orig_batch_size = args.batch_size
-        args.batch_size = int(args.batch_size / (1 - args.wandb.config.filter_ratio)) + 2 * args.sigma3
+        args.batch_size = int(args.batch_size / (1 - args.filter_ratio)) + 2 * args.sigma3
         
         #DROP LAST
         orig_updates = (len(train_dataset) // args.orig_batch_size) * args.max_epochs
@@ -137,13 +137,18 @@ def main_single():
         our_updates = (len(train_dataset) // args.batch_size) * args.max_epochs
         added_epochs = (orig_updates - our_updates) / (len(train_dataset) // args.batch_size)
         args.max_epochs += int(math.ceil(added_epochs))
+    else:
+        args.init_prob = 1
 
     args.wandb.config.update(args)
     args.wandb.watch([online_network, target_network, predictor])
     print(args.wandb.config)
+    
     train_dataset = ProgressiveDataset(train_dataset, args.wandb.config)
+    
     writer = SummaryWriter() if args.gpu == 0 else None
-    train_dataset.increase_stage(0, writer)
+    train_dataset.increase_stage(0, writer, args.wandb)
+    
     trainer = Trainer(online_network=online_network,
                         target_network=target_network,
                         optimizer=optimizer,

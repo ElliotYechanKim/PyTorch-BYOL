@@ -17,6 +17,7 @@ import torch.multiprocessing as mp
 import torch.distributed as dist
 import builtins
 from torch.utils.tensorboard import SummaryWriter
+from data.imagenet100 import ImageNet100
 
 parser = ArgumentParser(description='PyTorch ImageNet Training')
 parser.add_argument('--rundir', help='path to model')
@@ -25,17 +26,17 @@ parser.add_argument('--datadir', default = "/home/ykim/data/imagenet/", metavar=
 parser.add_argument('--dataset', default = "imagenet100")
 parser.add_argument('-j', '--workers', default=8, type=int, metavar='N',
                     help='number of data loading workers (default: 8)')
-parser.add_argument('--epochs', default=1000, type=int, metavar='N',
+parser.add_argument('--epochs', default=90, type=int, metavar='N',
                     help='number of total epochs to run')
-parser.add_argument('--warmup-epochs', default=20, type=int, metavar='N',
+parser.add_argument('--warmup-epochs', default=0, type=int, metavar='N',
                     help='number of warmup epochs to run')
-parser.add_argument('--optimizer', default='AdamW', type=str)        
-parser.add_argument('-b', '--batch-size', default=768, type=int,
+parser.add_argument('--optimizer', default='SGD', type=str)        
+parser.add_argument('-b', '--batch-size', default=512, type=int,
                     metavar='N',
                     help='mini-batch size (default: 1024), this is the total '
                          'batch size of all GPUs on all nodes when '
                          'using Data Parallel or Distributed Data Parallel')
-parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
+parser.add_argument('--lr', '--learning-rate', default=0.2, type=float,
                     metavar='LR', help='initial (base) learning rate', dest='lr')
 parser.add_argument('--wd', '--weight-decay', default=0, type=float,
                     metavar='W', help='weight decay (default: 0.)',
@@ -54,26 +55,6 @@ parser.add_argument('--network', default='resnet18', type=str)
 parser.add_argument('--train-epochs', default=200, type=int)
 best_acc1 = 0
 best_acc5 = 0
-
-class ImageNet100(ImageFolder):
-    def __init__(self, root, split, transform):
-        with open('../splits/imagenet100.txt') as f:
-            classes = [line.strip() for line in f]
-            class_to_idx = { cls: idx for idx, cls in enumerate(classes) }
-
-        super().__init__(os.path.join(root, split), transform=transform)
-        samples = []
-        for path, label in self.samples:
-            cls = self.classes[label]
-            if cls not in class_to_idx:
-                continue
-            label = class_to_idx[cls]
-            samples.append((path, label))
-
-        self.samples = samples
-        self.classes = classes
-        self.class_to_idx = class_to_idx
-        self.targets = [s[1] for s in samples]
 
 class LogisticRegression(torch.nn.Module):
     def __init__(self, input_dim, output_dim):
@@ -125,19 +106,19 @@ def load_model(args, config) -> torch.nn.Sequential:
         param = OrderedDict()
         load_params = torch.load(os.path.join(args.rundir, f'checkpoints/model{args.model_num}.pth'),
                             map_location=torch.device('cuda'))
-        
-        max_layer_num = 0
+        #max_layer_num = 0
         new_params: OrderedDict = load_params['target_network_state_dict']
-        for layer_name in new_params.keys():
-            # print(layer_name)
-            layer_name_split = layer_name.split('.')[1:]
-            if layer_name_split[0] == "projetion":
-                layer_name_split[0] = "projection"
-            new_layer_name = '.'.join(e for e in layer_name_split)
-            param[new_layer_name] = new_params[layer_name]
-        encoder.load_state_dict(param)
+        # for layer_name in new_params.keys():
+        #     # print(layer_name)
+        #     layer_name_split = layer_name.split('.')[1:]
+        #     if layer_name_split[0] == "projetion":
+        #         layer_name_split[0] = "projection"
+        #     new_layer_name = '.'.join(e for e in layer_name_split)
+        #     param[new_layer_name] = new_params[layer_name]
+        # encoder.load_state_dict(param)
         #print("Parameters successfully loaded from target_network_state_dict.")
         # remove the projection head
+        encoder.load_state_dict(new_params)
         encoder = torch.nn.Sequential(*list(encoder)[:-5])
     
     print(encoder)
