@@ -125,7 +125,9 @@ def main_single():
         optimizer = LARS(optimizer_params, lr=args.lr, weight_decay=args.wd, momentum=args.momentum, trust_coefficient=args.t)
     elif args.optimizer == 'AdamW':
         optimizer = torch.optim.AdamW(optimizer_params, lr=args.lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=args.wd)
-
+    elif args.optimizer == 'SGD':
+        optimizer = torch.optim.SGD(optimizer_params, lr=args.lr, weight_decay=args.wd, momentum=args.momentum)
+        
     if args.progressive:
         args.sigma3 = math.ceil(args.batch_size * 0.03)
         args.orig_batch_size = args.batch_size

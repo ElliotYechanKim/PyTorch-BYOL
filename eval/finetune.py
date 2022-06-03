@@ -7,7 +7,7 @@ import os
 sys.path.append('../')
 from models.resnet_base_network import ResNet18
 from argparse import ArgumentParser
-from torchvision.datasets import STL10, CIFAR10, CIFAR100, ImageFolder
+from torchvision.datasets import STL10, CIFAR10, CIFAR100
 from torch.utils.data.dataloader import DataLoader
 from collections import defaultdict, OrderedDict
 import time
@@ -24,7 +24,8 @@ parser.add_argument('--rundir', help='path to model')
 parser.add_argument('--datadir', default = "/home/ykim/data/imagenet/", metavar='DIR',
                     help='path to dataset')
 parser.add_argument('--dataset', default = "imagenet100")
-parser.add_argument('-j', '--workers', default=8, type=int, metavar='N',
+parser.add_argument('--prtrain-datset', default = "imagenet")
+parser.add_argument('-j', '--num-workers', default=8, type=int, metavar='N',
                     help='number of data loading workers (default: 8)')
 parser.add_argument('--epochs', default=90, type=int, metavar='N',
                     help='number of total epochs to run')
@@ -174,21 +175,39 @@ def main_ddp(rank, world_size):
     init_lr = args.lr * args.batch_size / 256
     args.batch_size = int(args.batch_size // world_size)
 
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                        std=[0.229, 0.224, 0.225])
-    train_transform = transforms.Compose([
-            transforms.RandomResizedCrop(224),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            normalize,
-        ])
+    if args.pretrain_dataset == 'imagenet':
+        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                            std=[0.229, 0.224, 0.225])
+        train_transform = transforms.Compose([
+                transforms.RandomResizedCrop(224),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                normalize,
+            ])
 
-    test_transform = transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            normalize,
-        ])
+        test_transform = transforms.Compose([
+                transforms.Resize(256),
+                transforms.CenterCrop(224),
+                transforms.ToTensor(),
+                normalize,
+            ])
+    elif args.prtrain_datset == 'stl10':
+        normalize = transforms.Normalize(mean=[0.43, 0.42, 0.39],
+                                            std=[0.27, 0.26, 0.27])
+
+        train_transform = transforms.Compose([
+                    transforms.RandomResizedCrop(96),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.ToTensor(),
+                    normalize,
+                    ])
+        
+        test_transform = transforms.Compose([
+                    transforms.Resize(96),
+                    transforms.CenterCrop(96),
+                    transforms.ToTensor(),
+                    normalize,
+                    ])
 
     if args.dataset == "imagenet100":
         train_dataset = ImageNet100(args.datadir, split='train', transform=train_transform)
