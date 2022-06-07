@@ -235,11 +235,11 @@ def main_ddp(rank, world_size):
 
     train_loader = DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None), drop_last = False,
-        sampler=train_sampler, num_workers=args.workers)
+        sampler=train_sampler, num_workers=args.num_workers)
     
     val_loader = DataLoader(
         val_dataset, batch_size=args.batch_size, shuffle=(val_sampler is None), drop_last = False,
-        sampler=val_sampler, num_workers=args.workers)
+        sampler=val_sampler, num_workers=args.num_workers)
 
     encoder, logreg = load_model(args, config)
 

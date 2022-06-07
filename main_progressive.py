@@ -107,7 +107,7 @@ def main_single():
         args.orig_img_size = 224
     elif args.dataset == 'stl10':
         train_dataset =  datasets.STL10(args.datadir, split='train+unlabeled')
-        args.orig_img_size = 96
+        args.orig_img_size = 64
 
     # When using a single GPU per process and per
     # DistributedDataParallel, we need to divide the batch size
