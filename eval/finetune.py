@@ -24,7 +24,7 @@ parser.add_argument('--rundir', help='path to model')
 parser.add_argument('--datadir', default = "/home/ykim/data/imagenet/", metavar='DIR',
                     help='path to dataset')
 parser.add_argument('--dataset', default = "imagenet100")
-parser.add_argument('--prtrain-datset', default = "imagenet")
+parser.add_argument('--pretrain-dataset', default = "imagenet")
 parser.add_argument('-j', '--num-workers', default=8, type=int, metavar='N',
                     help='number of data loading workers (default: 8)')
 parser.add_argument('--epochs', default=90, type=int, metavar='N',
@@ -191,7 +191,7 @@ def main_ddp(rank, world_size):
                 transforms.ToTensor(),
                 normalize,
             ])
-    elif args.prtrain_datset == 'stl10':
+    elif args.pretrain_dataset == 'stl10':
         normalize = transforms.Normalize(mean=[0.43, 0.42, 0.39],
                                             std=[0.27, 0.26, 0.27])
 
