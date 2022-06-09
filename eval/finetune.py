@@ -47,6 +47,7 @@ parser.add_argument('-p', '--print-freq', default=10, type=int,
 parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                     help='evaluate model on validation set')
 parser.add_argument('--single', action="store_true")
+parser.add_argument('--single-gpu', action="store_true")
 parser.add_argument('--model-num', type=int, default=0)
 parser.add_argument('--knn', action='store_true')
 parser.add_argument('--single-knn', action="store_true")
@@ -125,6 +126,172 @@ def load_model(args, config) -> torch.nn.Sequential:
     print(encoder)
     logreg = LogisticRegression(output_feature_dim, args.num_classes)
     return encoder, logreg
+
+def main_single(args):
+    global best_acc1
+    global best_acc5
+
+    args.gpu = 0
+    print(f"trained with : {args.gpu}")
+
+    torch.cuda.set_device(args.gpu)
+    torch.cuda.empty_cache()
+
+    if args.gpu != 0:
+        def print_pass(*args):
+            pass
+        builtins.print = print_pass
+
+    if not args.single:
+        config = yaml.load(open(os.path.join(args.rundir, 'checkpoints/config.yaml'), "r"), Loader=yaml.FullLoader)
+    else:
+        config = dict()
+        config['network'] = dict()
+        config['network']['projection_head'] = dict()
+        config['trainer'] = dict()
+        if args.network == 'resnet18':
+            config['network']['name'] = args.network
+            config['network']['projection_head']['mlp_hidden_size'] = 512
+            config['network']['projection_head']['projection_size'] = 128
+        elif args.network == 'resnet50':
+            config['network']['name'] = args.network
+            config['network']['projection_head']['mlp_hidden_size'] = 2048
+            config['network']['projection_head']['projection_size'] = 256
+        config['trainer']['max_epochs'] = args.train_epochs
+    
+    # Finetune learning rate before changing batch size
+    init_lr = args.lr * args.batch_size / 256
+
+    if args.pretrain_dataset == 'imagenet':
+        args.img_size = 224
+        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                            std=[0.229, 0.224, 0.225])
+        train_transform = transforms.Compose([
+                transforms.RandomResizedCrop(args.img_size),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                normalize,
+            ])
+
+        test_transform = transforms.Compose([
+                transforms.Resize(256),
+                transforms.CenterCrop(args.img_size),
+                transforms.ToTensor(),
+                normalize,
+            ])
+    elif args.pretrain_dataset == 'stl10':
+        args.img_size = 64
+        normalize = transforms.Normalize(mean=[0.43, 0.42, 0.39],
+                                            std=[0.27, 0.26, 0.27])
+
+        train_transform = transforms.Compose([
+                    transforms.RandomResizedCrop(args.img_size),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.ToTensor(),
+                    normalize,
+                    ])
+        
+        test_transform = transforms.Compose([
+                    transforms.Resize(args.img_size),
+                    transforms.CenterCrop(args.img_size),
+                    transforms.ToTensor(),
+                    normalize,
+                    ])
+
+    if args.dataset == "imagenet100":
+        train_dataset = ImageNet100(args.datadir, split='train', transform=train_transform)
+        val_dataset = ImageNet100(args.datadir, split='val', transform=test_transform)
+        args.num_classes = 100
+    elif args.dataset == 'stl10':
+        train_dataset = STL10(root=args.datadir, split='train', transform=train_transform, download = True)
+        val_dataset = STL10(root=args.datadir, split='test', transform=test_transform, download = True)
+        args.num_classes = 10
+    elif args.dataset == 'cifar10':
+        train_dataset = CIFAR10(root=args.datadir, train=True, transform=train_transform, download = True)
+        val_dataset = CIFAR10(root=args.datadir, train=False, transform=test_transform, download = True)
+        args.num_classes = 10
+    elif args.dataset == 'cifar100':
+        train_dataset = CIFAR100(root=args.datadir, train=True, transform=train_transform, download = True)
+        val_dataset = CIFAR100(root=args.datadir, train=False, transform=test_transform, download = True)
+        args.num_classes = 100
+    elif args.dataset == 'imagenet1000':
+        train_dataset = torchvision.datasets.ImageNet(args.datadir, split='train', transform=train_transform)
+        val_dataset = torchvision.datasets.ImageNet(args.datadir, split='val', transform=test_transform)
+        args.num_classes = 1000
+
+    train_sampler = None
+    val_sampler = None
+
+    train_loader = DataLoader(
+        train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None), drop_last = False,
+        sampler=train_sampler, num_workers=args.num_workers)
+    
+    val_loader = DataLoader(
+        val_dataset, batch_size=args.batch_size, shuffle=(val_sampler is None), drop_last = False,
+        sampler=val_sampler, num_workers=args.num_workers)
+
+    encoder, logreg = load_model(args, config)
+
+    encoder = encoder.to(args.gpu)
+    logreg = logreg.to(args.gpu)
+
+    # define loss function (criterion) and optimizer
+    criterion = torch.nn.CrossEntropyLoss().to(args.gpu)
+
+    if args.finetune:
+        parameters = list(encoder.parameters()) + list(logreg.parameters())
+    else:
+        parameters = logreg.parameters()
+    
+    if args.optimizer == "SGD":
+        optimizer = torch.optim.SGD(parameters, init_lr, momentum = 0.9,
+                                    weight_decay=args.weight_decay)
+    elif args.optimizer == "AdamW":
+        optimizer = torch.optim.AdamW(parameters, init_lr,
+                                    weight_decay=args.weight_decay)
+
+    if args.evaluate:
+        validate(val_loader, encoder, logreg, criterion, args)
+        return
+    
+    writer = SummaryWriter() if args.gpu == 0 else None
+    best_acc1_ls = []
+    best_acc5_ls = []
+    for epoch in range(args.epochs):
+
+        adjust_learning_rate(optimizer, init_lr, epoch, writer, args)
+
+        # train for one epoch
+        train(train_loader, encoder, logreg, criterion, optimizer, epoch, writer, args)
+
+        # evaluate on validation set
+        acc1, acc5 = validate(val_loader, encoder, logreg, criterion, args)
+
+        # remember best acc@1 and save checkpoint
+        is_best = acc1 > best_acc1
+        best_acc1 = max(acc1, best_acc1)
+        best_acc5 = max(acc5, best_acc5)
+
+        if args.gpu == 0:
+            save_checkpoint({
+                'epoch': epoch + 1,
+                'encoder_state_dict': encoder.state_dict(),
+                'logreg_state_dict' : logreg.state_dict(),
+                'best_acc1': best_acc1,
+                'optimizer' : optimizer.state_dict(),
+            }, is_best, args)
+        print(f"Best top 1 Accuracy on epoch {epoch} : {best_acc1}")
+        print(f"Best top 5 Accuracy on epoch {epoch} : {best_acc5}")
+
+        if epoch % 10 == 0:
+            best_acc1_ls.append(best_acc1)
+            best_acc5_ls.append(best_acc5)
+    
+    best_acc1_ls.append(best_acc1)
+    best_acc5_ls.append(best_acc5)
+
+    print(f"Best top 1 Accuarcay List : {best_acc1_ls}")
+    print(f"Best top 5 Accuarcay List : {best_acc5_ls}")
 
 def run_main(main_fn, world_size):
     mp.spawn(main_fn,
@@ -498,4 +665,8 @@ def accuracy(output, target, topk=(1,)):
 
 
 if __name__ == '__main__':
-    run_main(main_ddp, torch.cuda.device_count())
+    args = parser.parse_args()
+    if args.single_gpu:
+        main_single(args)
+    else:
+        run_main(main_ddp, torch.cuda.device_count())
