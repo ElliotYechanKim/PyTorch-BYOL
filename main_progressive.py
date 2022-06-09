@@ -57,8 +57,9 @@ parser.add_argument('--print-freq', type=int, default=10, help="print frequency"
 parser.add_argument('--single', action='store_true')
 parser.add_argument('--num-gpus', type=int, default=torch.cuda.device_count())
 
-#Progressive args
 parser.add_argument('--fix-random', action='store_true', help = 'Fix the seeds for debugging')
+
+#Progressive args
 parser.add_argument('--progressive', action='store_true')
 parser.add_argument('--init-prob',  type=float, default = 0.5)
 parser.add_argument('--max-prob',  type=float, default = 1.25)

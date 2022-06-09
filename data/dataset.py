@@ -34,7 +34,6 @@ class ProgressiveDataset(Dataset):
         normalize = transforms.Normalize(mean=mean, std=std)
 
         augmentation1 = [
-            transforms.Resize(img_size),
             transforms.RandomResizedCrop(img_size, scale=(0.08, 1.)),
             transforms.RandomApply([
                 transforms.ColorJitter(0.4 * s, 0.4 * s, 0.2 * s, 0.1 * s)  # not strengthened
@@ -47,7 +46,6 @@ class ProgressiveDataset(Dataset):
         ]
 
         augmentation2 = [
-            transforms.Resize(img_size),
             transforms.RandomResizedCrop(img_size, scale=(0.08, 1.)),
             transforms.RandomApply([
                 transforms.ColorJitter(0.4 * s, 0.4 * s, 0.2 * s, 0.1 * s)  # not strengthened

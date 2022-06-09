@@ -25,6 +25,7 @@ parser.add_argument('--datadir', default = "/home/ykim/data/imagenet/", metavar=
                     help='path to dataset')
 parser.add_argument('--dataset', default = "imagenet100")
 parser.add_argument('--pretrain-dataset', default = "imagenet")
+parser.add_argument('--img-size', default = 96, type=int)
 parser.add_argument('-j', '--num-workers', default=8, type=int, metavar='N',
                     help='number of data loading workers (default: 8)')
 parser.add_argument('--epochs', default=90, type=int, metavar='N',
@@ -163,7 +164,6 @@ def main_single(args):
     init_lr = args.lr * args.batch_size / 256
 
     if args.pretrain_dataset == 'imagenet':
-        args.img_size = 224
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                             std=[0.229, 0.224, 0.225])
         train_transform = transforms.Compose([
@@ -180,7 +180,6 @@ def main_single(args):
                 normalize,
             ])
     elif args.pretrain_dataset == 'stl10':
-        args.img_size = 64
         normalize = transforms.Normalize(mean=[0.43, 0.42, 0.39],
                                             std=[0.27, 0.26, 0.27])
 
