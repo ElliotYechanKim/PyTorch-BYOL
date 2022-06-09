@@ -24,8 +24,8 @@ parser = ArgumentParser()
 parser.add_argument('--progressive', action='store_true')
 parser.add_argument('-b', '--batch-size', type=int, default=128)
 parser.add_argument('--max-epochs', type=int, default=10)
-parser.add_argument('--init-prob', type=float, default=0.2)
-parser.add_argument('--max-prob', type=float, default=1.0)
+parser.add_argument('--init-prob', type=float, default=0.5)
+parser.add_argument('--max-prob', type=float, default=1.5)
 parser.add_argument('--name', type=str, default='resnet18')
 parser.add_argument('--filter-ratio', type=float, default=0.1)
 parser.add_argument('--sim-pretrained', action='store_true', help = 'Using pre-trained model to masuer the similarity')
@@ -165,13 +165,13 @@ def adjust_augment_ratio(batch_view_1, batch_view_2):
 def interpolation_test():
     linear = []
     print('Linear interpolation TEST from 0 to 10')
-    for i in range(10):
+    for i in range(args.max_epochs + 1):
         s = args.init_prob + (args.max_prob - args.init_prob) / args.max_epochs * i
         print(s)
     
     log_linear = []
     print('Log Linear interpolation TEST from 0 to 10')
-    for i in range(10):
+    for i in range(args.max_epochs):
         s = np.exp(np.log(args.init_prob) + (np.log(args.max_prob) - np.log(args.init_prob)) / \
                                                         np.log(args.max_epochs + 1) * np.log(i + 1))
         print(s)
@@ -205,8 +205,25 @@ def scale_test():
     print(linear)
     print(scale)
 
+def inverse_linear_scale_test():
+    scale = []
+    ss = []
+    linear_scale = []
+    for i in range(args.max_epochs):
+        s = args.init_prob + (args.max_prob - args.init_prob) / args.max_epochs * i
+        scale_lower = max((1 - s) + (0.08 - (1 - s)) / args.max_epochs * i, 0)
+        sscale = max((1 - args.init_prob) + (0.08 - (1 - args.init_prob)) / args.max_epochs * i, 0)
+        scale.append(scale_lower)
+        ss.append(s)
+        linear_scale.append(sscale)
+    
+    print(ss)
+    print(scale)
+    print(linear_scale)
+
 if __name__ == '__main__':
-    #interpolation_test()
-    similarity_test()
+    interpolation_test()
+    #similarity_test()
     #scale_test()
     #filter_length_tests()
+    #inverse_linear_scale_test()
