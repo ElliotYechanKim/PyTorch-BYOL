@@ -62,8 +62,12 @@ parser.add_argument('--fix-random', action='store_true', help = 'Fix the seeds f
 parser.add_argument('--progressive', action='store_true')
 parser.add_argument('--init-prob',  type=float, default = 0.5)
 parser.add_argument('--max-prob',  type=float, default = 1.25)
-parser.add_argument('--filter-ratio',  type=float, default = 0.1)
 parser.add_argument('--interpolate', type=str, default = 'linear')
+parser.add_argument('--num-stages', type=int, default = 10)
+
+#Filter args
+parser.add_argument('--filter', action='store_true')
+parser.add_argument('--filter-ratio',  type=float, default = 0.1)
 parser.add_argument('--sim-pretrained', action='store_true', help = 'Using pre-trained model to masuer the similarity')
 parser.add_argument('--filter-type', type=str, default = 'window')
 args = parser.parse_args()
@@ -128,7 +132,7 @@ def main_single():
     elif args.optimizer == 'SGD':
         optimizer = torch.optim.SGD(optimizer_params, lr=args.lr, weight_decay=args.wd, momentum=args.momentum)
         
-    if args.progressive:
+    if args.filter:
         args.sigma3 = math.ceil(args.batch_size * 0.03)
         args.orig_batch_size = args.batch_size
         args.batch_size = int(args.batch_size / (1 - args.filter_ratio)) + 2 * args.sigma3
@@ -139,7 +143,8 @@ def main_single():
         our_updates = (len(train_dataset) // args.batch_size) * args.max_epochs
         added_epochs = (orig_updates - our_updates) / (len(train_dataset) // args.batch_size)
         args.max_epochs += int(math.ceil(added_epochs))
-    else:
+    
+    if not args.progressive:
         args.init_prob = 1
 
     args.wandb.config.update(args)

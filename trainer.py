@@ -69,7 +69,7 @@ class Trainer:
         
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if not self.args.single else None
 
-        simfilter = SimFilter(self.args) if self.args.progressive else None
+        simfilter = SimFilter(self.args) if self.args.filter else None
         
         train_loader = DataLoader(train_dataset, batch_size=self.args.batch_size,
                                   shuffle=(train_sampler is None), sampler = train_sampler,
@@ -81,26 +81,30 @@ class Trainer:
 
         self.initializes_target_network()
         
-        for epoch_counter in range(self.args.max_epochs):
-            if not self.args.single:
-                train_loader.sampler.set_epoch(epoch_counter)
+        update_ratio = int(self.args.max_epochs / (self.args.num_stages + 1))
+        update_count = 0
 
-            lr = self.adjust_learning_rate(epoch_counter + 1)
-            m = self.adjust_momentum(epoch_counter)
+        for epoch in range(self.args.max_epochs):
+            if not self.args.single:
+                train_loader.sampler.set_epoch(epoch)
+
+            lr = self.adjust_learning_rate(epoch + 1)
+            m = self.adjust_momentum(epoch)
             if self.args.gpu == 0:
-                self.writer.add_scalar('learning_rate', lr, global_step=epoch_counter)
+                self.writer.add_scalar('learning_rate', lr, global_step=epoch)
                 self.wandb.log({'learning_rate' : lr})
-                self.writer.add_scalar('momentum', m, global_step=epoch_counter)
+                self.writer.add_scalar('momentum', m, global_step=epoch)
                 self.wandb.log({'momentum' : m})
             
-            niter = self.train_single(train_loader, niter, epoch_counter, simfilter)
+            niter = self.train_single(train_loader, niter, epoch, simfilter)
 
-            if self.args.progressive and epoch_counter != self.args.max_epochs - 1:
-                train_dataset.increase_stage(epoch_counter + 1, self.writer, self.wandb)
-                #self.increase_ratio(train_dataset, epoch_counter, self.writer)
+            #if self.args.progressive and (epoch + 1) % update_ratio == 0 and update_count <= self.args.num_stages:
+            if self.args.progressive and epoch != self.args.max_epochs - 1:
+                train_dataset.increase_stage(epoch, self.writer, self.wandb)
+                #self.increase_ratio(train_dataset, epoch, self.writer)
         
         if self.args.gpu == 0:
-            self.save_model(os.path.join(model_checkpoints_folder, f'model{epoch_counter}.pth'))
+            self.save_model(os.path.join(model_checkpoints_folder, f'model{epoch}.pth'))
             self.writer.close()
 
     def train_single(self, train_loader, niter, epoch, simfilter):
@@ -121,7 +125,7 @@ class Trainer:
             # measure data loading time
             data_time.update(time.time() - end)
             
-            if self.args.progressive and niter == self.args.total_iter:
+            if self.args.filter and niter == self.args.total_iter:
                 break
     
             batch_view_1 = batch_view_1.to(self.args.gpu)

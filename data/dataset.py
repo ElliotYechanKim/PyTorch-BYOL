@@ -22,17 +22,20 @@ class ProgressiveDataset(Dataset):
             
         elif self.args.interpolate == 'log':
             # s = np.exp(np.log(self.args.init_prob) + (np.log(self.args.max_prob - self.args.init_prob) - np.log(self.args.init_prob)) / \
-            #                                                         np.log(self.args.max_epochs) * np.log(epoch)) + self.args.init_prob
+            #                                                         np.log(self.args.num_stages) * np.log(epoch)) + self.args.init_prob
             s = np.exp(np.log(self.args.init_prob) + (np.log(self.args.max_prob) - np.log(self.args.init_prob)) / \
                                                                     np.log(self.args.max_epochs) * np.log(epoch + 1))
-        #scale_lower = 1 + (0.08 - 1) / self.args.max_epochs * epoch
-        scale_lower = max(1 - s, 0.08)
+
+        #scale_lower = max((1 - s) + (0.08 - (1 - s)) / self.args.max_epochs * epoch, 0) #scale_lower = max(1 - s, 0.08)
+        img_size = int(self.args.orig_img_size * s) #img_size = min(self.args.orig_img_size * s, self.args.orig_img_size)
+        
         mean = torch.tensor([0.43, 0.42, 0.39])
         std  = torch.tensor([0.27, 0.26, 0.27])
         normalize = transforms.Normalize(mean=mean, std=std)
 
         augmentation1 = [
-            transforms.RandomResizedCrop(self.args.orig_img_size * s, scale=(scale_lower, 1.)),
+            transforms.Resize(img_size),
+            transforms.RandomResizedCrop(img_size, scale=(0.08, 1.)),
             transforms.RandomApply([
                 transforms.ColorJitter(0.4 * s, 0.4 * s, 0.2 * s, 0.1 * s)  # not strengthened
             ], p=0.8 * s),
@@ -44,7 +47,8 @@ class ProgressiveDataset(Dataset):
         ]
 
         augmentation2 = [
-            transforms.RandomResizedCrop(self.args.orig_img_size * s, scale=(scale_lower, 1.)),
+            transforms.Resize(img_size),
+            transforms.RandomResizedCrop(img_size, scale=(0.08, 1.)),
             transforms.RandomApply([
                 transforms.ColorJitter(0.4 * s, 0.4 * s, 0.2 * s, 0.1 * s)  # not strengthened
             ], p=0.8 * s),
@@ -60,11 +64,10 @@ class ProgressiveDataset(Dataset):
         
         if writer:
             writer.add_scalar('s', s, global_step=epoch)
-            writer.add_scalar('image size', self.args.orig_img_size * s, global_step=epoch)
-            writer.add_scalar('scale_lower', scale_lower, global_step=epoch)
+            writer.add_scalar('image size', img_size, global_step=epoch)
+            #writer.add_scalar('scale_lower', scale_lower, global_step=epoch)
         
         if wandb:
             wandb.log({'s' : s})
-            img_size = self.args.orig_img_size * s
             wandb.log({'image size' : img_size})
-            wandb.log({'scale_lower' : scale_lower})
+            #wandb.log({'scale_lower' : scale_lower})

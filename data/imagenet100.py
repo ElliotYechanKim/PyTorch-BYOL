@@ -3,7 +3,7 @@ from torchvision import datasets
 
 class ImageNet100(datasets.ImageFolder):
     def __init__(self, root, split, transform=None):
-        with open('./splits/imagenet100.txt') as f:
+        with open('../splits/imagenet100.txt') as f:
             classes = [line.strip() for line in f]
             class_to_idx = { cls: idx for idx, cls in enumerate(classes) }
 
