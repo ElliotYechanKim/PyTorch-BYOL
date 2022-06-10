@@ -61,6 +61,7 @@ parser.add_argument('--fix-random', action='store_true', help = 'Fix the seeds f
 
 #Progressive args
 parser.add_argument('--progressive', action='store_true')
+parser.add_argument('--stage', action='store_true')
 parser.add_argument('--init-prob',  type=float, default = 0.5)
 parser.add_argument('--max-prob',  type=float, default = 1.25)
 parser.add_argument('--interpolate', type=str, default = 'linear')

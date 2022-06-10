@@ -3,6 +3,7 @@ from torchvision import transforms
 from data.loader import TwoCropsTransform, GaussianBlur, Solarize
 from torch.utils.data import Dataset
 import numpy as np
+import math
 
 class ProgressiveDataset(Dataset):
     def __init__(self, dataset, args):
@@ -15,19 +16,22 @@ class ProgressiveDataset(Dataset):
     def __getitem__(self, index):
         return self.dataset.__getitem__(index)
 
-    def increase_stage(self, epoch, writer=None, wandb=None):
-
+    def increase_stage(self, stage, writer=None, wandb=None):
+        
+        if self.args.stage:
+            numerator = self.args.num_stages
+        else:
+            numerator = self.args.max_epochs
+        
         if self.args.interpolate == 'linear':
-            s = self.args.init_prob + (self.args.max_prob - self.args.init_prob) / self.args.max_epochs * epoch
+            s = self.args.init_prob + (self.args.max_prob - self.args.init_prob) / (numerator - 1) * stage
             
         elif self.args.interpolate == 'log':
-            # s = np.exp(np.log(self.args.init_prob) + (np.log(self.args.max_prob - self.args.init_prob) - np.log(self.args.init_prob)) / \
-            #                                                         np.log(self.args.num_stages) * np.log(epoch)) + self.args.init_prob
             s = np.exp(np.log(self.args.init_prob) + (np.log(self.args.max_prob) - np.log(self.args.init_prob)) / \
-                                                                    np.log(self.args.max_epochs) * np.log(epoch + 1))
+                                                                    np.log(numerator) * np.log(stage + 1))
 
         #scale_lower = max((1 - s) + (0.08 - (1 - s)) / self.args.max_epochs * epoch, 0) #scale_lower = max(1 - s, 0.08)
-        img_size = int(self.args.orig_img_size * s) #img_size = min(self.args.orig_img_size * s, self.args.orig_img_size)
+        img_size = math.ceil(self.args.orig_img_size * s) #img_size = min(self.args.orig_img_size * s, self.args.orig_img_size)
         
         mean = torch.tensor([0.43, 0.42, 0.39])
         std  = torch.tensor([0.27, 0.26, 0.27])
@@ -61,8 +65,8 @@ class ProgressiveDataset(Dataset):
         self.dataset.transform = transforms_func
         
         if writer:
-            writer.add_scalar('s', s, global_step=epoch)
-            writer.add_scalar('image size', img_size, global_step=epoch)
+            writer.add_scalar('s', s, global_step=stage)
+            writer.add_scalar('image size', img_size, global_step=stage)
             #writer.add_scalar('scale_lower', scale_lower, global_step=epoch)
         
         if wandb:

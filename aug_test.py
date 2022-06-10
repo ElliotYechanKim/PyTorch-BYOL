@@ -165,15 +165,15 @@ def adjust_augment_ratio(batch_view_1, batch_view_2):
 def interpolation_test():
     linear = []
     print('Linear interpolation TEST from 0 to 10')
-    for i in range(args.max_epochs + 1):
-        s = args.init_prob + (args.max_prob - args.init_prob) / args.max_epochs * i
+    for i in range(args.max_epochs):
+        s = args.init_prob + (args.max_prob - args.init_prob) / (args.max_epochs - 1) * i
         print(s)
     
     log_linear = []
     print('Log Linear interpolation TEST from 0 to 10')
     for i in range(args.max_epochs):
         s = np.exp(np.log(args.init_prob) + (np.log(args.max_prob) - np.log(args.init_prob)) / \
-                                                        np.log(args.max_epochs + 1) * np.log(i + 1))
+                                                        np.log(args.max_epochs) * np.log(i + 1))
         print(s)
 
 def filter_length_tests():
